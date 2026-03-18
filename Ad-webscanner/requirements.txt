@@ -1,0 +1,50 @@
+# ============================================
+# N-FIREWALL ENTERPRISE GRADE - REQUIREMENTS
+# ============================================
+# Core UI
+streamlit>=1.28.0
+streamlit-option-menu>=0.3.6
+
+# Modern HTTP & Async (UPGRADED)
+httpx[http2]>=0.25.0
+nest_asyncio>=1.5.8
+aiofiles>=23.2.1
+
+# Browser Automation (NEW)
+playwright>=1.40.0
+
+# Data & Validation (UPGRADED)
+pydantic>=2.5.0
+pandas>=2.1.0
+numpy>=1.24.0
+
+# Reconnaissance (UPGRADED)
+dnspython>=2.4.2
+aiodns>=3.2.0
+wafw00f>=2.2.0
+python-Wappalyzer>=1.6.12
+nvdlib>=0.7.5
+requests>=2.31.0
+beautifulsoup4>=4.12.0
+python-whois>=0.9.3
+
+# Security & Analysis
+pyjwt>=2.8.0
+pyopenssl>=23.3.0
+scapy>=2.5.0
+scikit-learn>=1.3.0
+
+# Reporting (UPGRADED)
+WeasyPrint>=60.0
+jinja2>=3.1.2
+openpyxl>=3.1.0
+python-docx>=0.8.11
+fpdf2>=2.7.0
+
+# Visualization (NEW)
+plotly>=5.17.0
+
+# Utilities
+tqdm>=4.66.0
+python-dotenv>=1.0.0
+colorama>=0.4.6
