@@ -17,6 +17,11 @@ app = FastAPI(title="IronClad Security Scanner API")
 
 logger = logging.getLogger("webscanner.api")
 
+@app.get("/api/health")
+def health():
+    """Simple health check endpoint."""
+    return {"status": "ok", "service": "IronClad Backend"}
+
 # Configure CORS from env for production deployment.
 # Example: CORS_ORIGINS=https://iron-claud-security-webscanner.vercel.app,http://localhost:5173
 default_origins = [
