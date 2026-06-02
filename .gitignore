@@ -12,6 +12,7 @@ pip-delete-this-directory.txt
 ai_model.pkl
 ai_firewall_events.log
 waf_events.log
+.env
 
 # React / Node
 node_modules/
