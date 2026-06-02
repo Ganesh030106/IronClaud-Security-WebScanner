@@ -52,7 +52,7 @@ class DefenseGenerator:
 
         if any("etc/passwd" in str(v) for v in vulnerabilities.values()):
              modsec_rules.append("# BLOCK PATH TRAVERSAL")
-             modsec_rules.append('SecRule ARGS "@rx \.\./" "id:1003,phase:2,deny,status:403,msg:\'Virtual Patch: Path Traversal\'"')
+             modsec_rules.append(r'SecRule ARGS "@rx \.\.\/" "id:1003,phase:2,deny,status:403,msg:\'Virtual Patch: Path Traversal\'"')
 
         if not modsec_rules:
             return "No critical vulnerabilities requiring specific WAF rules found."

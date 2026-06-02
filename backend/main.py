@@ -109,7 +109,7 @@ def export_json():
     if not CURRENT_SCAN["results"]:
         raise HTTPException(status_code=400, detail="No scan results available to export.")
         
-    data = json.dumps(CURRENT_SCAN["results"], indent=4)
+    data = json.dumps(sanitize_for_json(CURRENT_SCAN["results"]), indent=4)
     return Response(
         content=data,
         media_type="application/json",
@@ -155,7 +155,7 @@ def export_pdf():
     if not CURRENT_SCAN["results"]:
         raise HTTPException(status_code=400, detail="No scan results available to export.")
         
-    domain = urlparse(CURRENT_SCAN["url"]).hostname
+    domain = urlparse(CURRENT_SCAN["url"]).hostname if CURRENT_SCAN["url"] else "unknown"
     pdf_bytes = create_pdf_report(CURRENT_SCAN["results"], domain)
     
     return Response(
@@ -177,10 +177,11 @@ def get_waf_logs():
                 break
             except:
                 pass
-    return {
+    payload = {
         "logs": logs,
         "is_running": is_port_open(8080)
     }
+    return JSONResponse(content=sanitize_for_json(payload))
 
 @app.get("/api/ai/status")
 def get_ai_status():
@@ -199,12 +200,13 @@ def get_ai_status():
     # Try finding model in backend or firewall directory
     ai_model_exists = os.path.exists("ai_model.pkl") or os.path.exists("firewall/ai_model.pkl")
     
-    return {
+    payload = {
         "is_trained": ai_model_exists,
         "model_path": "ai_model.pkl" if ai_model_exists else None,
         "logs": logs,
         "is_running": is_port_open(8081)
     }
+    return JSONResponse(content=sanitize_for_json(payload))
 
 def is_port_open(port: int) -> bool:
     import socket
