@@ -1,12 +1,14 @@
 from fastapi import FastAPI, BackgroundTasks, HTTPException, Response
 from fastapi.encoders import jsonable_encoder
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, HttpUrl
 import json
 import csv
 import io
 import os
 import logging
+import math
 from urllib.parse import urlparse
 from scanner import OWASPTester
 from utils.pdf_report import create_pdf_report
@@ -45,6 +47,17 @@ CURRENT_SCAN = {
 class ScanRequest(BaseModel):
     url: str
 
+def sanitize_for_json(value):
+    if isinstance(value, dict):
+        return {str(k): sanitize_for_json(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple, set)):
+        return [sanitize_for_json(v) for v in value]
+    if isinstance(value, float):
+        if math.isnan(value) or math.isinf(value):
+            return None
+        return value
+    return value
+
 def run_scan_task(url: str):
     global CURRENT_SCAN
     try:
@@ -79,15 +92,16 @@ def start_scan(request: ScanRequest, background_tasks: BackgroundTasks):
 @app.get("/api/scan/status")
 def get_scan_status():
     try:
-        return jsonable_encoder(CURRENT_SCAN)
+        safe_payload = sanitize_for_json(jsonable_encoder(CURRENT_SCAN))
+        return JSONResponse(content=safe_payload)
     except Exception as e:
         logger.exception("Failed to encode CURRENT_SCAN for /api/scan/status")
-        return {
+        return JSONResponse(content={
             "status": CURRENT_SCAN.get("status", "failed"),
             "url": CURRENT_SCAN.get("url"),
             "results": None,
             "error": CURRENT_SCAN.get("error") or f"Serialization error: {str(e)}",
-        }
+        })
 
 @app.get("/api/export/json")
 def export_json():
@@ -238,7 +252,8 @@ class IPRequest(BaseModel):
 
 @app.get("/api/waf/config")
 def get_waf_config():
-    return load_firewall_config()
+    safe_payload = sanitize_for_json(load_firewall_config())
+    return JSONResponse(content=safe_payload)
 
 @app.post("/api/waf/config/blacklist")
 def add_blacklist(req: IPRequest):
