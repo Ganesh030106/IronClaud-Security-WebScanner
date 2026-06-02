@@ -1,21 +1,35 @@
 from fastapi import FastAPI, BackgroundTasks, HTTPException, Response
+from fastapi.encoders import jsonable_encoder
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, HttpUrl
 import json
 import csv
 import io
 import os
+import logging
 from urllib.parse import urlparse
 from scanner import OWASPTester
 from utils.pdf_report import create_pdf_report
 
 app = FastAPI(title="IronClad Security Scanner API")
 
+logger = logging.getLogger("webscanner.api")
+
+# Configure CORS from env for production deployment.
+# Example: CORS_ORIGINS=https://iron-claud-security-webscanner.vercel.app,http://localhost:5173
+default_origins = [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "https://iron-claud-security-webscanner.vercel.app",
+]
+cors_origins_env = os.getenv("CORS_ORIGINS", "")
+allowed_origins = [o.strip() for o in cors_origins_env.split(",") if o.strip()] or default_origins
+
 # Enable CORS for React.js Frontend
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Allows all origins in development
-    allow_credentials=True,
+    allow_origins=allowed_origins,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -64,7 +78,16 @@ def start_scan(request: ScanRequest, background_tasks: BackgroundTasks):
 
 @app.get("/api/scan/status")
 def get_scan_status():
-    return CURRENT_SCAN
+    try:
+        return jsonable_encoder(CURRENT_SCAN)
+    except Exception as e:
+        logger.exception("Failed to encode CURRENT_SCAN for /api/scan/status")
+        return {
+            "status": CURRENT_SCAN.get("status", "failed"),
+            "url": CURRENT_SCAN.get("url"),
+            "results": None,
+            "error": CURRENT_SCAN.get("error") or f"Serialization error: {str(e)}",
+        }
 
 @app.get("/api/export/json")
 def export_json():

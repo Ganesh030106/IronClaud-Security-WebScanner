@@ -114,6 +114,16 @@ To demonstrate active inline protection, start either the traditional signature-
   python ai_firewall.py
   ```
 
+## Deployment
+
+### Backend on Render
+Deploy the `backend/` directory as a Python web service using the provided [render.yaml](render.yaml). Render should use `uvicorn main:app --host 0.0.0.0 --port $PORT` with `backend/` as the root directory.
+
+### Frontend on Vercel
+Deploy the `frontend/` app with the root [vercel.json](vercel.json). In the Vercel project settings, set `VITE_API_BASE_URL` to your Render backend URL, for example `https://webscanner-backend.onrender.com`.
+
+The frontend reads that variable in [frontend/src/api/scanner.js](frontend/src/api/scanner.js), so the browser will send all API requests to Render instead of `localhost`.
+
 ---
 
 ## 🧠 Dynamic Simulated Threat Scoring
