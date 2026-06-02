@@ -1,5 +1,0 @@
-streamlit
-requests
-python-whois
-beautifulsoup4
-fpdf2
