@@ -9,4 +9,4 @@ services:
       - key: PYTHON_VERSION
         value: 3.11.9
       - key: CORS_ORIGINS
-        value: https://iron-claud-security-webscanner.vercel.app,http://localhost:5173,http://127.0.0.1:5173
+        value: https://ironclaudsecurity.vercel.app,https://iron-claud-security-webscanner.vercel.app,http://localhost:5173,http://127.0.0.1:5173

@@ -51,6 +51,7 @@ default_origins = [
     "http://localhost:5173",
     "http://127.0.0.1:5173",
     "https://iron-claud-security-webscanner.vercel.app",
+    "https://ironclaudsecurity.vercel.app",
 ]
 cors_origins_env = os.getenv("CORS_ORIGINS", "")
 allowed_origins = [o.strip() for o in cors_origins_env.split(",") if o.strip()] or default_origins
