@@ -17,6 +17,29 @@ app = FastAPI(title="IronClad Security Scanner API")
 
 logger = logging.getLogger("webscanner.api")
 
+@app.on_event("startup")
+def startup_event():
+    """Start WAF and AI Firewall in background threads on startup."""
+    import threading
+    try:
+        from firewall.ironclad_waf import run_waf
+        from firewall.ai_firewall import run_ai_firewall
+        
+        logger.info("Starting WAF and AI Firewall background services...")
+        
+        # Start WAF (port 8080)
+        waf_thread = threading.Thread(target=run_waf, args=(8080,), daemon=True)
+        waf_thread.start()
+        logger.info("WAF background thread spawned on port 8080.")
+        
+        # Start AI Firewall (port 8081)
+        ai_thread = threading.Thread(target=run_ai_firewall, args=(8081,), daemon=True)
+        ai_thread.start()
+        logger.info("AI Firewall background thread spawned on port 8081.")
+    except Exception as e:
+        logger.error(f"Error starting background firewall services: {e}")
+
+
 @app.get("/api/health")
 def health():
     """Simple health check endpoint."""

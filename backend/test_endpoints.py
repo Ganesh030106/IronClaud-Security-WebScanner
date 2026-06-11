@@ -1,8 +1,9 @@
 import sys
-sys.path.append('e:/Firewall-main/Web_scanner/backend')
+import os
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from fastapi.testclient import TestClient
 from main import app
-import os
+
 
 client = TestClient(app)
 
