@@ -54,7 +54,8 @@ default_origins = [
     "https://ironclaudsecurity.vercel.app",
 ]
 cors_origins_env = os.getenv("CORS_ORIGINS", "")
-allowed_origins = [o.strip() for o in cors_origins_env.split(",") if o.strip()] or default_origins
+env_origins = [o.strip() for o in cors_origins_env.split(",") if o.strip()]
+allowed_origins = list(set(default_origins + env_origins))
 
 # Enable CORS for React.js Frontend
 app.add_middleware(
