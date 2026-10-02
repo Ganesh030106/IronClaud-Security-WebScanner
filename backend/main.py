@@ -3,6 +3,7 @@ from fastapi.encoders import jsonable_encoder
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, HttpUrl
+from typing import Optional
 import json
 import csv
 import io
@@ -76,6 +77,7 @@ CURRENT_SCAN = {
 
 class ScanRequest(BaseModel):
     url: str
+    scan_mode: Optional[str] = "deep"  # "quick" or "deep"
 
 def sanitize_for_json(value):
     if isinstance(value, dict):
@@ -88,15 +90,16 @@ def sanitize_for_json(value):
         return value
     return value
 
-def run_scan_task(url: str):
+def run_scan_task(url: str, scan_mode: str = "deep"):
     global CURRENT_SCAN
     try:
         CURRENT_SCAN["status"] = "scanning"
         CURRENT_SCAN["url"] = url
+        CURRENT_SCAN["scan_mode"] = scan_mode
         CURRENT_SCAN["error"] = None
         CURRENT_SCAN["results"] = None
         
-        tester = OWASPTester(url)
+        tester = OWASPTester(url, scan_mode=scan_mode)
         results = tester.run_all_checks()
         
         CURRENT_SCAN["results"] = results
@@ -116,8 +119,12 @@ def start_scan(request: ScanRequest, background_tasks: BackgroundTasks):
     if CURRENT_SCAN["status"] == "scanning":
         return {"status": "scanning", "message": "A scan is already in progress."}
         
-    background_tasks.add_task(run_scan_task, url)
-    return {"status": "scanning", "message": "Scan started in background."}
+    scan_mode = (request.scan_mode or "deep").lower().strip()
+    if scan_mode not in ["quick", "deep"]:
+        scan_mode = "deep"
+
+    background_tasks.add_task(run_scan_task, url, scan_mode)
+    return {"status": "scanning", "message": f"Scan started in background ({scan_mode} mode).", "scan_mode": scan_mode}
 
 @app.get("/api/scan/status")
 def get_scan_status():

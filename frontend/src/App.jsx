@@ -1,13 +1,226 @@
-import React, { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { 
-  Shield, Activity, Terminal, AlertTriangle, Cpu, Globe, 
-  Database, FileText, CheckSquare, Download, Play, RefreshCw, CheckCircle2, AlertCircle, Info, ExternalLink
+  Shield, Terminal, AlertTriangle, Database, FileText, 
+  Download, Play, RefreshCw, CheckCircle2, AlertCircle, 
+  Zap, ShieldAlert, Search, X, Copy 
 } from 'lucide-react';
 import { 
   ResponsiveContainer, AreaChart, Area, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid 
 } from 'recharts';
 import { scannerApi } from './api/scanner';
 import './App.css';
+
+const VULNERABILITY_CATALOG = [
+  { 
+    id: 'CRITICAL_Hardcoded_Secrets', 
+    title: 'CRITICAL: Hardcoded API Keys / Secrets',
+    cwe: 'CWE-798',
+    cvss_score: 9.8,
+    cvss_vector: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H',
+    severity: 'CRITICAL',
+    vector_summary: 'Remote Unauthenticated Key Exposure',
+    remediation: 'Immediately revoke leaked keys from cloud provider dashboards (OpenAI, AWS, Stripe, GitHub). Transition to runtime environment secrets (.env) and add secret scanning hooks to CI/CD.',
+    virtual_patch: 'SecRule RESPONSE_BODY "(?:sk-[a-zA-Z0-9]{20,}|AKIA[0-9A-Z]{16}|ghp_[a-zA-Z0-9]{36})" "id:100101,phase:4,deny,status:500,log,msg:\'Data Leak: Hardcoded Secret Intercepted\'"'
+  },
+  { 
+    id: 'A10_SSRF', 
+    title: 'A10: Server-Side Request Forgery (SSRF)',
+    cwe: 'CWE-918',
+    cvss_score: 9.6,
+    cvss_vector: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:N',
+    severity: 'CRITICAL',
+    vector_summary: 'Cloud Metadata & Internal Network Pivot',
+    remediation: 'Filter outbound web requests by blocking private IP ranges (127.0.0.1, 169.254.169.254, 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16). Enforce strict URL domain whitelists for server-side fetches.',
+    virtual_patch: 'SecRule ARGS "(?:169\\.254\\.169\\.254|127\\.0\\.0\\.1|metadata\\.google|localhost)" "id:100102,phase:2,deny,status:403,log,msg:\'SSRF Target Blocked\'"'
+  },
+  { 
+    id: 'A03_Path_Traversal_LFI', 
+    title: 'A03: Path Traversal / Local File Inclusion (LFI)',
+    cwe: 'CWE-22',
+    cvss_score: 9.3,
+    cvss_vector: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:N',
+    severity: 'CRITICAL',
+    vector_summary: 'Filesystem Directory Escape & File Retrieval',
+    remediation: 'Sanitize input with path.basename() or reject dot-dot-slash patterns. Never pass untrusted user input directly to filesystem APIs (open, readFile, include).',
+    virtual_patch: 'SecRule ARGS "(?:\\.\\./|\\.\\.\\\\|/etc/passwd|win\\.ini|system32)" "id:100103,phase:2,deny,status:403,log,msg:\'Path Traversal / LFI Attempt Blocked\'"'
+  },
+  { 
+    id: 'A03_Command_Injection', 
+    title: 'A03: OS Command Injection',
+    cwe: 'CWE-78',
+    cvss_score: 9.8,
+    cvss_vector: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H',
+    severity: 'CRITICAL',
+    vector_summary: 'Arbitrary Remote System Code Execution',
+    remediation: 'Avoid invoking OS shells (exec, system, popen). Use parameterized process APIs like subprocess.run([cmd, arg1, arg2], shell=False).',
+    virtual_patch: 'SecRule ARGS "(?:;\\s*cat\\s+/etc/passwd|\\|\\s*whoami|`id`|\\$\\(whoami\\))" "id:100104,phase:2,deny,status:403,log,msg:\'Command Injection Blocked\'"'
+  },
+  { 
+    id: 'A03_SSTI', 
+    title: 'A03: Server-Side Template Injection (SSTI)',
+    cwe: 'CWE-1336',
+    cvss_score: 9.0,
+    cvss_vector: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H',
+    severity: 'CRITICAL',
+    vector_summary: 'Template Engine Code Execution',
+    remediation: 'Pass untrusted user parameters as template context variables instead of string concatenation. Enable sandbox environments in Jinja2/Twig/Smarty.',
+    virtual_patch: 'SecRule ARGS "(?:\\{\\{.*\\}\\}|\\$\\{.*\\}|<%.*%>|#\\{.*\\})" "id:100105,phase:2,deny,status:403,log,msg:\'SSTI Template Delimiter Blocked\'"'
+  },
+  { 
+    id: 'A03_NoSQL_Injection', 
+    title: 'A03: NoSQL Operator Injection',
+    cwe: 'CWE-943',
+    cvss_score: 8.8,
+    cvss_vector: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:N',
+    severity: 'HIGH',
+    vector_summary: 'NoSQL Authentication Bypass & Data Dumping',
+    remediation: 'Sanitize query selectors using mongo-sanitize. Disallow dollar ($) operators from user inputs and enforce schema typing.',
+    virtual_patch: 'SecRule ARGS_NAMES "^\\$(?:gt|ne|eq|regex|where)" "id:100106,phase:2,deny,status:403,log,msg:\'NoSQL Operator Injection Blocked\'"'
+  },
+  { 
+    id: 'A08_XXE_Injection', 
+    title: 'A08: XML External Entity (XXE) Injection',
+    cwe: 'CWE-611',
+    cvss_score: 8.6,
+    cvss_vector: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:H',
+    severity: 'HIGH',
+    vector_summary: 'XML Parser Entity Resolution & Disclosure',
+    remediation: 'Disable external DTD resolution (disallow-doctype-decl) and general entities in all XML parsers and soap clients.',
+    virtual_patch: 'SecRule REQUEST_BODY "(?:<!ENTITY|SYSTEM\\s+[\'"].*[\'"]|<!DOCTYPE)" "id:100107,phase:2,deny,status:403,log,msg:\'XXE Injection Blocked\'"'
+  },
+  { 
+    id: 'A08_Insecure_Deserialization', 
+    title: 'A08: Insecure Deserialization',
+    cwe: 'CWE-502',
+    cvss_score: 8.9,
+    cvss_vector: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H',
+    severity: 'HIGH',
+    vector_summary: 'Object Unpickling & Gadget Chain Execution',
+    remediation: 'Do not accept serialized objects from untrusted sources. Use standard JSON with schema validation.',
+    virtual_patch: 'SecRule REQUEST_COOKIES|ARGS "(?:_\\$\\$ND_FUNC\\$\\$_|rO0AB|cos\\nsystem)" "id:100108,phase:2,deny,status:403,log,msg:\'Insecure Deserialization Token Blocked\'"'
+  },
+  { 
+    id: 'A03_Injection', 
+    title: 'A03: SQL Injection Risks',
+    cwe: 'CWE-89',
+    cvss_score: 8.9,
+    cvss_vector: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:N',
+    severity: 'HIGH',
+    vector_summary: 'Database Query Hijack & Extraction',
+    remediation: 'Use parameterized statements and ORMs. Avoid string concatenation when building queries.',
+    virtual_patch: 'SecRule ARGS "(?:union\\s+select|select.*from|\'\\s*or\\s*\'1\'=\'1)" "id:100109,phase:2,deny,status:403,log,msg:\'SQL Injection Blocked\'"'
+  },
+  { 
+    id: 'A03_Blind_SQL_Injection', 
+    title: 'A03: Time-Based Blind SQLi',
+    cwe: 'CWE-89',
+    cvss_score: 8.7,
+    cvss_vector: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N',
+    severity: 'HIGH',
+    vector_summary: 'Inference Data Exfiltration Via Sleep Delays',
+    remediation: 'Validate input data types strictly (e.g., cast IDs to integer) and enforce prepared statements across all endpoints.',
+    virtual_patch: 'SecRule ARGS "(?:waitfor\\s+delay|pg_sleep|sleep\\s*\\(|dbms_pipe\\.receive_message)" "id:100110,phase:2,deny,status:403,log,msg:\'Blind SQLi Time Delay Blocked\'"'
+  },
+  { 
+    id: 'A07_XSS', 
+    title: 'A07: Cross-Site Scripting (XSS / Breakouts)',
+    cwe: 'CWE-79',
+    cvss_score: 7.2,
+    cvss_vector: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:C/C:L/I:L/A:N',
+    severity: 'HIGH',
+    vector_summary: 'Client Browser Execution & Session Hijack',
+    remediation: 'HTML-entity-encode dynamic data before outputting in templates, and configure a strict Content-Security-Policy (CSP) with script nonces.',
+    virtual_patch: 'SecRule ARGS "(?:<script|javascript:|onerror\\s*=|onload\\s*=|alert\\s*\\()" "id:100111,phase:2,deny,status:403,log,msg:\'XSS Payload Blocked\'"'
+  },
+  { 
+    id: 'A01_Broken_Access_Control', 
+    title: 'A01: Broken Access Control',
+    cwe: 'CWE-284',
+    cvss_score: 7.5,
+    cvss_vector: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N',
+    severity: 'HIGH',
+    vector_summary: 'Privilege Escalation & Unauthorized Admin Access',
+    remediation: 'Enforce access checks server-side on every protected endpoint and route using JWT authorization middleware.',
+    virtual_patch: 'SecRule REQUEST_URI "@rx ^/(admin|dashboard|portal|manage)" "id:100112,phase:1,chain,deny,status:401\\n SecRule REQUEST_HEADERS:Authorization "@eq 0""'
+  },
+  { 
+    id: 'A05_Web_Cache_Poisoning', 
+    title: 'A05: Web Cache Poisoning & Deception',
+    cwe: 'CWE-444',
+    cvss_score: 6.8,
+    cvss_vector: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:N/I:H/A:N',
+    severity: 'MEDIUM',
+    vector_summary: 'Unkeyed HTTP Header Cache Poisoning',
+    remediation: 'Include unkeyed headers (X-Forwarded-Host, X-Original-URL) in cache keys or strip them at the CDN/reverse proxy layer before request processing.',
+    virtual_patch: 'SecRule REQUEST_HEADERS:X-Forwarded-Host "!@rx ^[a-zA-Z0-9.-]+$" "id:100113,phase:1,deny,status:400,log,msg:\'Cache Poisoning Header Blocked\'"'
+  },
+  { 
+    id: 'A03_CRLF_Injection', 
+    title: 'A03: CRLF Injection / Header Splitting',
+    cwe: 'CWE-113',
+    cvss_score: 6.5,
+    cvss_vector: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:L/I:L/A:N',
+    severity: 'MEDIUM',
+    vector_summary: 'HTTP Response Header Injection',
+    remediation: 'Sanitize %0d and %0a characters before placing user values into HTTP headers or redirect URLs.',
+    virtual_patch: 'SecRule ARGS "(?:%0d|%0a|\\r|\\n)" "id:100114,phase:2,deny,status:403,log,msg:\'CRLF Header Splitting Blocked\'"'
+  },
+  { 
+    id: 'A01_Host_Header_Injection', 
+    title: 'A01: Host Header Injection',
+    cwe: 'CWE-601',
+    cvss_score: 6.1,
+    cvss_vector: 'CVSS:3.1/AV:N/AC:H/PR:N/UI:R/S:U/C:L/I:L/A:N',
+    severity: 'MEDIUM',
+    vector_summary: 'Host Header Spoofing & Cache Poisoning',
+    remediation: 'Configure web servers to only respond to explicitly whitelisted Host headers and reject unknown virtual hosts.',
+    virtual_patch: 'SecRule REQUEST_HEADERS:Host "!@rx ^(localhost|[a-zA-Z0-9.-]+\\.yourdomain\\.com)$" "id:100115,phase:1,deny,status:400,log,msg:\'Untrusted Host Header\'"'
+  },
+  { 
+    id: 'A02_Cryptographic_Failures', 
+    title: 'A02: Cryptographic Failures & Cookie Security',
+    cwe: 'CWE-319',
+    cvss_score: 6.5,
+    cvss_vector: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:H/I:N/A:N',
+    severity: 'MEDIUM',
+    vector_summary: 'Insecure Transmission & Missing Cookie Flags',
+    remediation: 'Enable HSTS (Strict-Transport-Security), enforce HTTPS everywhere, and add Secure, HttpOnly, and SameSite=Lax attributes to all cookies.',
+    virtual_patch: 'SecRule RESPONSE_HEADERS:Set-Cookie "!@rx (?i)samesite" "id:100116,phase:3,pass,log,msg:\'Cookie missing SameSite attribute\'"'
+  },
+  { 
+    id: 'A03_Prototype_Pollution', 
+    title: 'A03: Prototype Pollution (Client-Side)',
+    cwe: 'CWE-1321',
+    cvss_score: 6.3,
+    cvss_vector: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:L/I:L/A:N',
+    severity: 'MEDIUM',
+    vector_summary: 'Client Object Prototype Manipulation',
+    remediation: 'Sanitize __proto__ and constructor property names in recursive object-merging utilities or freeze prototypes with Object.freeze().',
+    virtual_patch: 'SecRule ARGS "(?:__proto__|prototype|constructor\\[)" "id:100117,phase:2,deny,status:403,log,msg:\'Prototype Pollution Attempt Blocked\'"'
+  },
+  { 
+    id: 'A05_Security_Misconfig_Headers', 
+    title: 'A05: Security Misconfigurations (Missing Headers)',
+    cwe: 'CWE-16',
+    cvss_score: 5.3,
+    cvss_vector: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:N/A:N',
+    severity: 'MEDIUM',
+    vector_summary: 'Missing Browser Defense Policy Headers',
+    remediation: 'Deploy Content-Security-Policy, X-Frame-Options, X-Content-Type-Options, Referrer-Policy, and Permissions-Policy headers.',
+    virtual_patch: 'SecRule RESPONSE_HEADERS:X-Frame-Options "@eq 0" "id:100118,phase:3,pass,log,msg:\'Missing X-Frame-Options Header\'"'
+  },
+  { 
+    id: 'A06_Vulnerable_Components', 
+    title: 'A06: Vulnerable Third-Party Components',
+    cwe: 'CWE-1104',
+    cvss_score: 5.0,
+    cvss_vector: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:N/A:N',
+    severity: 'LOW',
+    vector_summary: 'Software Version Disclosure & Outdated Components',
+    remediation: 'Strip Server and X-Powered-By response headers to conceal backend framework and runtime versions.',
+    virtual_patch: 'SecRule RESPONSE_HEADERS:Server "!@rx ^$" "id:100119,phase:3,pass,log,msg:\'Server Banner Leaked\'"'
+  }
+];
 
 export default function App() {
   const [activeTab, setActiveTab] = useState('DASHBOARD');
@@ -31,7 +244,23 @@ export default function App() {
   const [newWhitelistIp, setNewWhitelistIp] = useState('');
   const [newBlacklistIp, setNewBlacklistIp] = useState('');
   
+  // HUD Advanced Controls & CVSS States
+  const [scanMode, setScanMode] = useState('deep');
+  const [vulnSearch, setVulnSearch] = useState('');
+  const [vulnSeverityFilter, setVulnSeverityFilter] = useState('ALL');
+  const [hideCleanChecks, setHideCleanChecks] = useState(false);
+  const [selectedDossier, setSelectedDossier] = useState(null);
+  const [copyToast, setCopyToast] = useState('');
+
   const terminalEndRef = useRef(null);
+
+  const handleCopyText = (text, label) => {
+    if (navigator?.clipboard?.writeText) {
+      navigator.clipboard.writeText(typeof text === 'string' ? text : JSON.stringify(text, null, 2));
+    }
+    setCopyToast(label);
+    setTimeout(() => setCopyToast(''), 2500);
+  };
 
   // Auto-scroll terminal
   useEffect(() => {
@@ -84,6 +313,7 @@ export default function App() {
       console.error(err);
     }
   };
+
 
   const handleAddWhitelist = async (e) => {
     e.preventDefault();
@@ -180,22 +410,56 @@ export default function App() {
 
     try {
       setLoading(true);
-      appendLog('INITIALIZE', `Acquiring target lock on: ${targetUrl}`);
+      appendLog('INITIALIZE', `Acquiring target lock on: ${targetUrl} [${scanMode.toUpperCase()} MODE]`);
       
-      const response = await scannerApi.startScan(targetUrl);
+      await scannerApi.startScan(targetUrl, scanMode);
       setScanState({
         status: 'scanning',
         url: targetUrl,
+        scan_mode: scanMode,
         results: null,
         error: null
       });
       setLoading(false);
-      appendLog('INITIALIZE', 'Scan launched. Background execution threads spawned.');
+      appendLog('INITIALIZE', `Scan launched (${scanMode} mode). Background execution threads spawned.`);
     } catch (err) {
       setLoading(false);
       appendLog('ERROR', err.message);
       alert(err.message);
     }
+  };
+
+  const getThreatMatrix = () => {
+    if (!results || !results.vulnerabilities) return null;
+    let maxCvss = 0.0;
+    let criticalCount = 0;
+    let highCount = 0;
+    let mediumCount = 0;
+    let lowCount = 0;
+
+    VULNERABILITY_CATALOG.forEach(cat => {
+      const desc = results.vulnerabilities[cat.id];
+      const hasIssue = Array.isArray(desc)
+        ? desc.length > 0 && !desc[0]?.toString().includes("No ") && !desc[0]?.toString().includes("Secure") && !desc[0]?.toString().includes("Protected")
+        : desc && !desc.toString().includes("No ") && !desc.toString().includes("Protected");
+      
+      if (hasIssue) {
+        if (cat.cvss_score > maxCvss) maxCvss = cat.cvss_score;
+        if (cat.severity === 'CRITICAL') criticalCount++;
+        else if (cat.severity === 'HIGH') highCount++;
+        else if (cat.severity === 'MEDIUM') mediumCount++;
+        else if (cat.severity === 'LOW') lowCount++;
+      }
+    });
+
+    return {
+      maxCvss: maxCvss || 0.0,
+      criticalCount,
+      highCount,
+      mediumCount,
+      lowCount,
+      totalThreats: criticalCount + highCount + mediumCount + lowCount
+    };
   };
 
   const refreshWafAndAi = async () => {
@@ -221,7 +485,6 @@ export default function App() {
   const getVulnCounts = () => {
     if (!results || !results.vulnerabilities) return [];
     
-    // Categorize by severity
     let critical = 0;
     let high = 0;
     let medium = 0;
@@ -230,18 +493,17 @@ export default function App() {
 
     const vulns = results.vulnerabilities;
     
-    // Simple rules for parsing categories
     Object.keys(vulns).forEach(key => {
       const details = vulns[key];
       const isVulnerable = Array.isArray(details) 
-        ? details.length > 0 && !details[0]?.toString().includes("No ") && !details[0]?.toString().includes("Secure")
+        ? details.length > 0 && !details[0]?.toString().includes("No ") && !details[0]?.toString().includes("Secure") && !details[0]?.toString().includes("Protected")
         : details && !details.toString().includes("No ") && !details.toString().includes("Protected");
       
       if (isVulnerable) {
-        if (key.includes('CRITICAL') || key.includes('SSTI') || key.includes('Secrets')) critical++;
-        else if (key.includes('A03') || key.includes('Injection') || key.includes('Command')) high++;
-        else if (key.includes('A01') || key.includes('A02') || key.includes('Access')) medium++;
-        else if (key.includes('A05') || key.includes('A06') || key.includes('Headers')) low++;
+        if (key.includes('CRITICAL') || key.includes('SSTI') || key.includes('Secrets') || key.includes('A10_SSRF') || key.includes('A08_XXE')) critical++;
+        else if (key.includes('A03') || key.includes('Injection') || key.includes('Command') || key.includes('Traversal') || key.includes('NoSQL')) high++;
+        else if (key.includes('A01') || key.includes('A02') || key.includes('Access') || key.includes('A08_Insecure_Deserialization') || key.includes('XSS')) medium++;
+        else if (key.includes('A05') || key.includes('A06') || key.includes('Headers') || key.includes('Cache')) low++;
         else info++;
       }
     });
@@ -298,6 +560,26 @@ export default function App() {
         </div>
       </header>
 
+      {/* Scan Mode Switcher */}
+      <div className="scan-mode-container">
+        <button 
+          type="button"
+          onClick={() => setScanMode('quick')}
+          className={`scan-mode-btn quick ${scanMode === 'quick' ? 'active' : ''}`}
+          disabled={scanState.status === 'scanning'}
+        >
+          <Zap size={16} /> ⚡ QUICK RECON (Fast Surface & SSL Triage • ~5-10s)
+        </button>
+        <button 
+          type="button"
+          onClick={() => setScanMode('deep')}
+          className={`scan-mode-btn deep ${scanMode === 'deep' ? 'active' : ''}`}
+          disabled={scanState.status === 'scanning'}
+        >
+          <ShieldAlert size={16} /> 🛡️ DEEP AUDIT (Full OWASP + Active Fuzzing & Exploits • ~30-60s)
+        </button>
+      </div>
+
       {/* Target input Form */}
       <form onSubmit={handleStartScan} className="cyber-form">
         <input 
@@ -320,7 +602,7 @@ export default function App() {
             </span>
           ) : (
             <span style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-              <Play size={18} /> TARGET ACQUIRE
+              <Play size={18} /> LAUNCH {scanMode.toUpperCase()} AUDIT
             </span>
           )}
         </button>
@@ -484,6 +766,60 @@ export default function App() {
               </div>
             </div>
 
+            {/* CVSS Threat Matrix & Risk Profiler */}
+            {getThreatMatrix() && (
+              <div className="cyber-card" style={{ marginTop: '20px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border-color)', paddingBottom: '10px', marginBottom: '15px' }}>
+                  <h3 style={{ color: 'var(--color-cyan)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <ShieldAlert size={20} /> CVSS v3.1 THREAT MATRIX & RISK PROFILER
+                  </h3>
+                  <span className={`cvss-pill ${getThreatMatrix().maxCvss >= 9 ? 'critical' : getThreatMatrix().maxCvss >= 7 ? 'high' : getThreatMatrix().maxCvss >= 4 ? 'medium' : 'clean'}`}>
+                    MAX RISK SCORE: {getThreatMatrix().maxCvss.toFixed(1)} / 10.0
+                  </span>
+                </div>
+
+                <div className="cvss-breakdown-grid" style={{ marginBottom: '15px' }}>
+                  <div className="cvss-metric-box" style={{ cursor: 'pointer' }} onClick={() => { setActiveTab('VULNERABILITIES'); setVulnSeverityFilter('CRITICAL'); }}>
+                    <span className="label">🔴 CRITICAL RISKS</span>
+                    <span className="val" style={{ color: 'var(--color-red)' }}>{getThreatMatrix().criticalCount} Findings</span>
+                  </div>
+                  <div className="cvss-metric-box" style={{ cursor: 'pointer' }} onClick={() => { setActiveTab('VULNERABILITIES'); setVulnSeverityFilter('HIGH'); }}>
+                    <span className="label">🟠 HIGH RISKS</span>
+                    <span className="val" style={{ color: '#ff7800' }}>{getThreatMatrix().highCount} Findings</span>
+                  </div>
+                  <div className="cvss-metric-box" style={{ cursor: 'pointer' }} onClick={() => { setActiveTab('VULNERABILITIES'); setVulnSeverityFilter('MEDIUM'); }}>
+                    <span className="label">🟡 MEDIUM RISKS</span>
+                    <span className="val" style={{ color: 'var(--color-yellow)' }}>{getThreatMatrix().mediumCount} Findings</span>
+                  </div>
+                  <div className="cvss-metric-box" style={{ cursor: 'pointer' }} onClick={() => { setActiveTab('VULNERABILITIES'); setVulnSeverityFilter('LOW'); }}>
+                    <span className="label">🔵 LOW RISKS</span>
+                    <span className="val" style={{ color: 'var(--color-cyan)' }}>{getThreatMatrix().lowCount} Findings</span>
+                  </div>
+                  <div className="cvss-metric-box">
+                    <span className="label">EXPLOIT VECTOR</span>
+                    <span className="val" style={{ color: '#fff' }}>Network (AV:N)</span>
+                  </div>
+                  <div className="cvss-metric-box">
+                    <span className="label">AUTH PREREQUISITE</span>
+                    <span className="val" style={{ color: 'var(--color-green)' }}>Unauthenticated</span>
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#070814', padding: '10px 15px', borderRadius: '4px', fontSize: '0.85rem' }}>
+                  <span style={{ color: 'var(--text-secondary)' }}>
+                    Active Audit Profile: <strong style={{ color: 'var(--color-cyan)' }}>{results.info.mode_description || results.info.scan_mode?.toUpperCase() || 'STANDARD'}</strong>
+                  </span>
+                  <button 
+                    onClick={() => setActiveTab('VULNERABILITIES')} 
+                    className="cyber-btn" 
+                    style={{ padding: '4px 12px', fontSize: '0.75rem' }}
+                  >
+                    INSPECT ALL IN GRID &rarr;
+                  </button>
+                </div>
+              </div>
+            )}
+
             <div className="cyber-card" style={{ marginTop: '20px' }}>
               <h3 style={{ color: 'var(--color-cyan)', borderBottom: '1px solid var(--border-color)', paddingBottom: '10px', marginBottom: '15px' }}>
                 TECHNOLOGY & HOST PROFILE
@@ -606,101 +942,165 @@ export default function App() {
         {/* Vulnerabilities Tab */}
         {activeTab === 'VULNERABILITIES' && results && (
           <div>
-            <h3 style={{ color: 'var(--color-cyan)', marginBottom: '15px' }}>OWASP TOP 10 DANGER GRID</h3>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
+              <div>
+                <h3 style={{ color: 'var(--color-cyan)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <ShieldAlert size={20} /> OWASP TOP 10 DANGER GRID & CVSS AUDIT
+                </h3>
+                <p style={{ color: 'var(--text-secondary)', fontSize: '0.85rem', marginTop: '4px' }}>
+                  Real-time vulnerability findings categorized by CVSS v3.1 severity, CWE classification, and automated ModSecurity defense patches.
+                </p>
+              </div>
+            </div>
+
+            {/* Filter Toolbar */}
+            <div className="vuln-toolbar">
+              <div className="vuln-search-box">
+                <Search size={16} color="var(--text-muted)" />
+                <input 
+                  type="text" 
+                  placeholder="Filter findings by name, CWE, payload signature..."
+                  value={vulnSearch}
+                  onChange={(e) => setVulnSearch(e.target.value)}
+                />
+                {vulnSearch && (
+                  <button onClick={() => setVulnSearch('')} style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}>
+                    <X size={14} />
+                  </button>
+                )}
+              </div>
+
+              <div className="filter-pills-row">
+                {['ALL', 'CRITICAL', 'HIGH', 'MEDIUM', 'LOW', 'CLEAN'].map((f) => (
+                  <button
+                    key={f}
+                    onClick={() => setVulnSeverityFilter(f)}
+                    className={`filter-pill-btn ${vulnSeverityFilter === f ? (f === 'CRITICAL' ? 'active critical' : 'active') : ''}`}
+                  >
+                    {f}
+                  </button>
+                ))}
+
+                <button 
+                  onClick={() => setHideCleanChecks(prev => !prev)}
+                  className={`filter-pill-btn ${hideCleanChecks ? 'active' : ''}`}
+                  style={{ marginLeft: '6px' }}
+                >
+                  {hideCleanChecks ? '✓ Hiding Clean Checks' : 'Show All Checks'}
+                </button>
+              </div>
+            </div>
+
+            {/* Vulnerabilities Grid */}
             <div className="cyber-grid-2">
-              {[
-                { 
-                  id: 'A01_Broken_Access_Control', 
-                  title: 'A01: Broken Access Control', 
-                  desc: results.vulnerabilities.A01_Broken_Access_Control 
-                },
-                { 
-                  id: 'A02_Cryptographic_Failures', 
-                  title: 'A02: Cryptographic Failures', 
-                  desc: results.vulnerabilities.A02_Cryptographic_Failures 
-                },
-                { 
-                  id: 'A03_Injection', 
-                  title: 'A03: SQL Injection Risks', 
-                  desc: results.vulnerabilities.A03_Injection 
-                },
-                { 
-                  id: 'A03_Command_Injection', 
-                  title: 'A03: OS Command Injection', 
-                  desc: results.vulnerabilities.A03_Command_Injection 
-                },
-                { 
-                  id: 'A05_Security_Misconfig_Headers', 
-                  title: 'A05: Security Misconfigurations (Missing Headers)', 
-                  desc: results.vulnerabilities.A05_Security_Misconfig_Headers?.missing 
-                },
-                { 
-                  id: 'A06_Vulnerable_Components', 
-                  title: 'A06: Vulnerable Third-Party Components', 
-                  desc: results.vulnerabilities.A06_Vulnerable_Components 
-                },
-                { 
-                  id: 'A07_XSS', 
-                  title: 'A07: Reflected Cross-Site Scripting (XSS)', 
-                  desc: results.vulnerabilities.A07_XSS 
-                },
-                { 
-                  id: 'CRITICAL_Hardcoded_Secrets', 
-                  title: 'CRITICAL: Hardcoded API Keys / Secrets', 
-                  desc: results.vulnerabilities.CRITICAL_Hardcoded_Secrets 
-                }
-              ].map(vuln => {
-                const isSafe = Array.isArray(vuln.desc)
-                  ? vuln.desc.length === 0 || vuln.desc[0]?.toString().includes("No ") || vuln.desc[0]?.toString().includes("Secure")
-                  : !vuln.desc || 
-                    (typeof vuln.desc === 'object' 
-                      ? Object.keys(vuln.desc).length === 0 
-                      : vuln.desc.toString().includes("No ") || vuln.desc.toString().includes("Protected"));
-                  
-                return (
-                  <div key={vuln.id} className={`cyber-card ${isSafe ? 'success' : 'critical'}`}>
-                    <h4 style={{ color: isSafe ? 'var(--color-green)' : 'var(--color-red)', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      {isSafe ? <CheckCircle2 size={18} /> : <AlertTriangle size={18} />} {vuln.title}
-                    </h4>
-                    <div style={{ marginTop: '10px', fontSize: '0.9rem' }}>
-                      {Array.isArray(vuln.desc) ? (
-                        vuln.desc.length > 0 ? (
-                          <ul style={{ paddingLeft: '20px' }}>
-                            {vuln.desc.map((d, idx) => (
-                              <li key={idx} style={{ margin: '5px 0' }}>
-                                {typeof d === 'object' ? (
-                                  <div>
-                                    <strong style={{ color: 'var(--color-red)' }}>[{d.type}]</strong> in {d.file}
-                                    <pre style={{ background: '#090a12', padding: '8px', overflowX: 'auto', marginTop: '5px', border: '1px solid #1a1d2d', color: '#ffb700' }}>
-                                      {d.snippet}
-                                    </pre>
-                                  </div>
-                                ) : d}
-                              </li>
-                            ))}
-                          </ul>
-                        ) : (
-                          <span style={{ color: 'var(--text-muted)' }}>Secure / Checked. No findings.</span>
-                        )
-                      ) : typeof vuln.desc === 'object' && vuln.desc !== null ? (
-                        Object.keys(vuln.desc).length > 0 ? (
-                          <ul style={{ paddingLeft: '20px' }}>
-                            {Object.entries(vuln.desc).map(([k, v]) => (
-                              <li key={k} style={{ margin: '5px 0' }}>
-                                <strong>{k}:</strong> {v}
-                              </li>
-                            ))}
-                          </ul>
-                        ) : (
-                          <span style={{ color: 'var(--text-muted)' }}>Secure / Checked. No exposed components.</span>
-                        )
-                      ) : (
-                        <p style={{ color: 'var(--text-primary)' }}>{vuln.desc || 'Checked. No vulnerabilities detected.'}</p>
-                      )}
+              {VULNERABILITY_CATALOG
+                .map(vuln => {
+                  const desc = results.vulnerabilities[vuln.id];
+                  const isSafe = Array.isArray(desc)
+                    ? desc.length === 0 || desc[0]?.toString().includes("No ") || desc[0]?.toString().includes("Secure") || desc[0]?.toString().includes("Skipped")
+                    : !desc || 
+                      (typeof desc === 'object' 
+                        ? Object.keys(desc).length === 0 
+                        : desc.toString().includes("No ") || desc.toString().includes("Protected"));
+
+                  return { ...vuln, desc, isSafe };
+                })
+                .filter(vuln => {
+                  // Severity filter
+                  if (vulnSeverityFilter === 'CLEAN') {
+                    if (!vuln.isSafe) return false;
+                  } else if (vulnSeverityFilter !== 'ALL') {
+                    if (vuln.isSafe || vuln.severity !== vulnSeverityFilter) return false;
+                  }
+
+                  // Hide clean checks toggle
+                  if (hideCleanChecks && vulnSeverityFilter === 'ALL' && vuln.isSafe) {
+                    return false;
+                  }
+
+                  // Search keyword filter
+                  if (vulnSearch.trim()) {
+                    const q = vulnSearch.toLowerCase();
+                    const titleMatch = vuln.title.toLowerCase().includes(q);
+                    const cweMatch = vuln.cwe.toLowerCase().includes(q);
+                    const descMatch = JSON.stringify(vuln.desc).toLowerCase().includes(q);
+                    if (!titleMatch && !cweMatch && !descMatch) return false;
+                  }
+
+                  return true;
+                })
+                .map(vuln => {
+                  return (
+                    <div key={vuln.id} className={`cyber-card ${vuln.isSafe ? 'success' : 'critical'}`} style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
+                      <div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '10px', marginBottom: '8px' }}>
+                          <h4 style={{ color: vuln.isSafe ? 'var(--color-green)' : 'var(--color-red)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            {vuln.isSafe ? <CheckCircle2 size={18} /> : <AlertTriangle size={18} />} {vuln.title}
+                          </h4>
+                          <span className={`cvss-pill ${vuln.isSafe ? 'clean' : vuln.severity.toLowerCase()}`}>
+                            {vuln.isSafe ? 'CLEAN' : `${vuln.severity} ${vuln.cvss_score}`}
+                          </span>
+                        </div>
+
+                        <div style={{ display: 'flex', gap: '8px', marginBottom: '10px' }}>
+                          <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', background: '#090a14', padding: '2px 6px', borderRadius: '3px', border: '1px solid var(--border-color)' }}>
+                            {vuln.cwe}
+                          </span>
+                          <span style={{ fontSize: '0.75rem', color: 'var(--color-cyan)', background: '#090a14', padding: '2px 6px', borderRadius: '3px', border: '1px solid var(--border-color)' }}>
+                            {vuln.vector_summary}
+                          </span>
+                        </div>
+
+                        <div style={{ fontSize: '0.9rem' }}>
+                          {Array.isArray(vuln.desc) ? (
+                            vuln.desc.length > 0 ? (
+                              <ul style={{ paddingLeft: '20px' }}>
+                                {vuln.desc.map((d, idx) => (
+                                  <li key={idx} style={{ margin: '5px 0' }}>
+                                    {typeof d === 'object' ? (
+                                      <div>
+                                        <strong style={{ color: 'var(--color-red)' }}>[{d.type}]</strong> in {d.file}
+                                        <pre style={{ background: '#090a12', padding: '8px', overflowX: 'auto', marginTop: '5px', border: '1px solid #1a1d2d', color: '#ffb700' }}>
+                                          {d.snippet}
+                                        </pre>
+                                      </div>
+                                    ) : d}
+                                  </li>
+                                ))}
+                              </ul>
+                            ) : (
+                              <span style={{ color: 'var(--text-muted)' }}>Secure / Checked. No findings.</span>
+                            )
+                          ) : typeof vuln.desc === 'object' && vuln.desc !== null ? (
+                            Object.keys(vuln.desc).length > 0 ? (
+                              <ul style={{ paddingLeft: '20px' }}>
+                                {Object.entries(vuln.desc).map(([k, v]) => (
+                                  <li key={k} style={{ margin: '5px 0' }}>
+                                    <strong>{k}:</strong> {v}
+                                  </li>
+                                ))}
+                              </ul>
+                            ) : (
+                              <span style={{ color: 'var(--text-muted)' }}>Secure / Checked. No exposed components.</span>
+                            )
+                          ) : (
+                            <p style={{ color: 'var(--text-primary)' }}>{vuln.desc || 'Checked. No vulnerabilities detected.'}</p>
+                          )}
+                        </div>
+                      </div>
+
+                      <div style={{ marginTop: '15px', paddingTop: '10px', borderTop: '1px solid var(--border-color)', display: 'flex', justifyContent: 'flex-end' }}>
+                        <button
+                          onClick={() => setSelectedDossier(vuln)}
+                          className="cyber-btn"
+                          style={{ padding: '4px 12px', fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '5px' }}
+                        >
+                          <FileText size={12} /> INSPECT DOSSIER & VIRTUAL PATCH
+                        </button>
+                      </div>
                     </div>
-                  </div>
-                );
-              })}
+                  );
+                })}
             </div>
           </div>
         )}
@@ -1139,6 +1539,27 @@ export default function App() {
                   triggered: results.vulnerabilities.CRITICAL_Hardcoded_Secrets?.length > 0 
                 },
                 { 
+                  id: 'ssrf', 
+                  title: 'Block Server-Side Request Forgery (SSRF)', 
+                  desc: 'Validate all target endpoints against an explicit hostname whitelist and enforce strict firewall egress rules against RFC 1918 and cloud metadata IPs (169.254.169.254).', 
+                  priority: 'HIGH_CRITICAL', 
+                  triggered: results.vulnerabilities.A10_SSRF?.length > 0 && !results.vulnerabilities.A10_SSRF[0]?.includes('No SSRF') 
+                },
+                { 
+                  id: 'lfi', 
+                  title: 'Sanitize Filepath & Directory Parameters (LFI / Traversal)', 
+                  desc: 'Enforce realpath() canonicalization, strip directory traversal tokens (../), and avoid passing user input into filesystem operations.', 
+                  priority: 'HIGH_CRITICAL', 
+                  triggered: results.vulnerabilities.A03_Path_Traversal_LFI?.length > 0 && !results.vulnerabilities.A03_Path_Traversal_LFI[0]?.includes('No simple') 
+                },
+                { 
+                  id: 'nosql', 
+                  title: 'Harden NoSQL Queries against Operator Injection', 
+                  desc: 'Sanitize request bodies, strictly cast types, and disallow objects containing MongoDB operators ($gt, $ne, $where).', 
+                  priority: 'HIGH_CRITICAL', 
+                  triggered: results.vulnerabilities.A03_NoSQL_Injection?.length > 0 && !results.vulnerabilities.A03_NoSQL_Injection[0]?.includes('No NoSQL') 
+                },
+                { 
                   id: 'sqli', 
                   title: 'Implement Prepared Statements for SQL inputs', 
                   desc: 'Sanitize form variables and parameter bindings to stop SQL injection attacks.', 
@@ -1162,11 +1583,11 @@ export default function App() {
                 { 
                   id: 'cookies', 
                   title: 'Secure session cookie attributes', 
-                  desc: 'Set the Secure and HttpOnly flags on all cookies parsed by backend sessions.', 
+                  desc: 'Set the Secure, HttpOnly, and SameSite flags on all cookies parsed by backend sessions.', 
                   priority: 'MEDIUM', 
                   triggered: results.vulnerabilities.A02_Cryptographic_Failures?.some(x => x.includes('Cookie')) 
                 }
-              ].map((fix, idx) => (
+              ].map((fix) => (
                 <li key={fix.id} style={{ display: 'flex', gap: '15px', padding: '15px', borderBottom: '1px solid var(--border-color)', background: fix.triggered ? 'rgba(255, 0, 85, 0.02)' : 'transparent' }}>
                   <div style={{ marginTop: '3px' }}>
                     <input 
@@ -1203,6 +1624,7 @@ export default function App() {
             </ul>
           </div>
         )}
+
 
         {/* Export Tab */}
         {activeTab === 'EXPORT' && results && (
@@ -1251,6 +1673,130 @@ export default function App() {
           <div ref={terminalEndRef}></div>
         </div>
       </footer>
+
+      {/* Interactive Cyber Dossier & Virtual Patch Modal */}
+      {selectedDossier && (
+        <div className="cyber-modal-overlay" onClick={() => setSelectedDossier(null)}>
+          <div className="cyber-modal-card" onClick={(e) => e.stopPropagation()}>
+            <div className="cyber-modal-header">
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <span className={`cvss-pill ${selectedDossier.isSafe ? 'clean' : selectedDossier.severity.toLowerCase()}`}>
+                  {selectedDossier.isSafe ? 'CLEAN' : `${selectedDossier.severity} ${selectedDossier.cvss_score}`}
+                </span>
+                <h3 style={{ color: 'var(--text-primary)', fontSize: '1.05rem' }}>
+                  {selectedDossier.title}
+                </h3>
+              </div>
+              <button 
+                onClick={() => setSelectedDossier(null)}
+                style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            <div className="cyber-modal-body">
+              {/* CVSS v3.1 Breakdown Grid */}
+              <div className="cvss-breakdown-grid">
+                <div className="cvss-metric-box">
+                  <span className="label">CWE IDENTIFIER</span>
+                  <span className="val">{selectedDossier.cwe}</span>
+                </div>
+                <div className="cvss-metric-box">
+                  <span className="label">CVSS v3.1 BASE</span>
+                  <span className="val" style={{ color: selectedDossier.cvss_score >= 9 ? 'var(--color-red)' : 'var(--color-yellow)' }}>
+                    {selectedDossier.cvss_score} / 10.0
+                  </span>
+                </div>
+                <div className="cvss-metric-box">
+                  <span className="label">ATTACK VECTOR</span>
+                  <span className="val">Network (AV:N)</span>
+                </div>
+                <div className="cvss-metric-box">
+                  <span className="label">COMPLEXITY</span>
+                  <span className="val">Low (AC:L)</span>
+                </div>
+                <div className="cvss-metric-box">
+                  <span className="label">PRIVILEGES</span>
+                  <span className="val">None (PR:N)</span>
+                </div>
+                <div className="cvss-metric-box">
+                  <span className="label">USER INTERACTION</span>
+                  <span className="val">None (UI:N)</span>
+                </div>
+              </div>
+
+              {/* CVSS Vector String */}
+              <div>
+                <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', textTransform: 'uppercase' }}>CVSS v3.1 Vector String</span>
+                <div style={{ background: '#05060f', border: '1px solid var(--border-color)', padding: '8px 12px', borderRadius: '4px', marginTop: '5px', fontSize: '0.8rem', color: 'var(--color-cyan)', fontFamily: 'var(--font-mono)' }}>
+                  {selectedDossier.cvss_vector}
+                </div>
+              </div>
+
+              {/* Evidence / PoC block */}
+              <div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                  <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Audited Evidence / Finding Response</span>
+                  <button 
+                    onClick={() => handleCopyText(selectedDossier.desc, 'Evidence Copied to Clipboard!')}
+                    className="filter-pill-btn"
+                    style={{ fontSize: '0.7rem', padding: '2px 8px' }}
+                  >
+                    <Copy size={11} style={{ marginRight: '4px' }} /> Copy Finding
+                  </button>
+                </div>
+                <div className="code-preview-box">
+                  {Array.isArray(selectedDossier.desc) ? (
+                    selectedDossier.desc.map((d, i) => (
+                      <div key={i} style={{ marginBottom: '4px' }}>
+                        {typeof d === 'object' ? JSON.stringify(d, null, 2) : d}
+                      </div>
+                    ))
+                  ) : typeof selectedDossier.desc === 'object' ? (
+                    JSON.stringify(selectedDossier.desc, null, 2)
+                  ) : (
+                    selectedDossier.desc || 'No payload triggered.'
+                  )}
+                </div>
+              </div>
+
+              {/* Developer Remediation Advice */}
+              <div style={{ background: 'rgba(0, 210, 255, 0.05)', border: '1px solid rgba(0, 210, 255, 0.2)', padding: '14px', borderRadius: '6px' }}>
+                <h4 style={{ color: 'var(--color-cyan)', fontSize: '0.9rem', marginBottom: '6px' }}>
+                  🛡️ DEVELOPER REMEDIATION DIRECTIVE
+                </h4>
+                <p style={{ color: 'var(--text-primary)', fontSize: '0.85rem', lineHeight: '1.5' }}>
+                  {selectedDossier.remediation}
+                </p>
+              </div>
+
+              {/* ModSecurity Virtual Patch Rule */}
+              <div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                  <span style={{ fontSize: '0.75rem', color: 'var(--color-yellow)', textTransform: 'uppercase' }}>⚡ Automated ModSecurity Virtual Defense Patch</span>
+                  <button 
+                    onClick={() => handleCopyText(selectedDossier.virtual_patch, 'ModSecurity Patch Copied to Clipboard!')}
+                    className="filter-pill-btn"
+                    style={{ fontSize: '0.7rem', padding: '2px 8px', borderColor: 'var(--color-yellow)', color: 'var(--color-yellow)' }}
+                  >
+                    <Copy size={11} style={{ marginRight: '4px' }} /> Copy Rule
+                  </button>
+                </div>
+                <div className="code-preview-box" style={{ color: 'var(--color-green)' }}>
+                  {selectedDossier.virtual_patch}
+                </div>
+              </div>
+
+              {copyToast && (
+                <div style={{ textAlign: 'center', padding: '6px', background: 'rgba(0, 255, 65, 0.15)', border: '1px solid var(--color-green)', color: 'var(--color-green)', borderRadius: '4px', fontSize: '0.8rem' }}>
+                  ✓ {copyToast}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

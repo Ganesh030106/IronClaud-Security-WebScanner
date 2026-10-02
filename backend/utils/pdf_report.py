@@ -139,5 +139,24 @@ def create_pdf_report(results, domain):
     if not a07_issues or (isinstance(a07_issues, list) and "No simple" in str(a07_issues[0])):
         a07_issues = ["No simple reflected XSS detected."]
     pdf.add_result_section("A07: Cross-Site Scripting (XSS)", a07_issues)
+
+    # Next-Gen Vulnerability Findings
+    ssrf_issues = results['vulnerabilities'].get('A10_SSRF', ["No SSRF detected."])
+    pdf.add_result_section("A10: Server-Side Request Forgery (SSRF)", ssrf_issues)
+
+    traversal_issues = results['vulnerabilities'].get('A03_Path_Traversal_LFI', ["No Path Traversal detected."])
+    pdf.add_result_section("A03: Path Traversal / LFI", traversal_issues)
+
+    nosql_issues = results['vulnerabilities'].get('A03_NoSQL_Injection', ["No NoSQL Injection detected."])
+    pdf.add_result_section("A03: NoSQL Operator Injection", nosql_issues)
+
+    xxe_issues = results['vulnerabilities'].get('A08_XXE_Injection', ["No XXE detected."])
+    pdf.add_result_section("A08: XML External Entity (XXE) Injection", xxe_issues)
+
+    deser_issues = results['vulnerabilities'].get('A08_Insecure_Deserialization', ["No deserialization issues detected."])
+    pdf.add_result_section("A08: Insecure Deserialization", deser_issues)
+
+    cache_issues = results['vulnerabilities'].get('A05_Web_Cache_Poisoning', ["No cache poisoning detected."])
+    pdf.add_result_section("A05: Web Cache Poisoning / Deception", cache_issues)
     
     return bytes(pdf.output(dest='S'))

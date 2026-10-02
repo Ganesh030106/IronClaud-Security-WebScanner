@@ -3,6 +3,7 @@ import dns.resolver
 import dns.zone
 import dns.query
 import socket
+import concurrent.futures
 from urllib.parse import urljoin
 from config import CLOUD_BUCKET_PATTERNS, API_ENDPOINTS, CMS_SENSITIVE_FILES, BYPASS_HEADERS
 
@@ -15,20 +16,31 @@ class InfrastructureAuditor:
     # --- Feature 1: Cloud Bucket Enumeration ---
     def check_cloud_buckets(self):
         found_buckets = []
+        candidates = []
         for provider, pattern in CLOUD_BUCKET_PATTERNS.items():
             names_to_test = [self.domain_keyword, self.domain, f"{self.domain_keyword}-backup"]
             for name in names_to_test:
-                bucket_url = pattern % name
-                try:
-                    resp = requests.get(bucket_url, timeout=2)
-                    if resp.status_code == 200:
-                        if "ListBucketResult" in resp.text or "<Contents>" in resp.text:
-                            found_buckets.append(f"OPEN {provider} Bucket found: {bucket_url}")
-                        else:
-                            found_buckets.append(f"Exists (but protected) {provider}: {bucket_url}")
-                    elif resp.status_code == 403:
-                         found_buckets.append(f"Protected {provider} Bucket exists: {bucket_url}")
-                except: pass
+                candidates.append((provider, pattern % name))
+
+        def probe_bucket(item):
+            provider, bucket_url = item
+            try:
+                resp = requests.get(bucket_url, timeout=1.0)
+                if resp.status_code == 200:
+                    if "ListBucketResult" in resp.text or "<Contents>" in resp.text:
+                        return f"OPEN {provider} Bucket found: {bucket_url}"
+                    else:
+                        return f"Exists (but protected) {provider}: {bucket_url}"
+                elif resp.status_code == 403:
+                    return f"Protected {provider} Bucket exists: {bucket_url}"
+            except:
+                pass
+            return None
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=6) as executor:
+            results = list(executor.map(probe_bucket, candidates))
+            found_buckets = [r for r in results if r]
+
         return found_buckets
 
     # --- Feature 2: API Discovery ---
@@ -48,8 +60,12 @@ class InfrastructureAuditor:
     # --- Feature 3: Email Spoofing Check (DNS) ---
     def check_email_security(self):
         issues = []
+        resolver = dns.resolver.Resolver()
+        resolver.lifetime = 1.5
+        resolver.timeout = 1.0
+
         try:
-            answers = dns.resolver.resolve(self.domain, 'TXT')
+            answers = resolver.resolve(self.domain, 'TXT')
             spf_found = False
             for rdata in answers:
                 if "v=spf1" in str(rdata):
@@ -64,7 +80,7 @@ class InfrastructureAuditor:
 
         try:
             dmarc_domain = f"_dmarc.{self.domain}"
-            answers = dns.resolver.resolve(dmarc_domain, 'TXT')
+            answers = resolver.resolve(dmarc_domain, 'TXT')
             dmarc_found = False
             for rdata in answers:
                 if "v=DMARC1" in str(rdata):

@@ -1,5 +1,6 @@
 import re
 import requests
+import concurrent.futures
 from bs4 import BeautifulSoup, Comment
 from urllib.parse import urljoin, urlparse
 from config import PII_REGEX, JS_DANGEROUS_SINKS, MUTATION_EXTENSIONS
@@ -62,23 +63,35 @@ class ContentAuditor:
         return findings
 
     # --- Feature 3: Smart Mutation Fuzzer ---
-    def fuzz_discovered_files(self, discovered_links):
+    def fuzz_discovered_files(self, discovered_links, max_files=5):
         """
         Takes links found by the crawler (e.g., /admin/login.php) 
-        and checks for backup versions (e.g., /admin/login.php.bak).
+        and checks for backup versions concurrently.
         """
         findings = []
-        files_to_fuzz = [link for link in discovered_links if "." in urlparse(link).path and not urlparse(link).path.endswith("/")]
-        
-        for file_url in files_to_fuzz[:10]:
+        files_to_fuzz = [link for link in discovered_links if "." in urlparse(link).path and not urlparse(link).path.endswith("/")][:max_files]
+        if not files_to_fuzz:
+            return findings
+
+        candidates = []
+        for file_url in files_to_fuzz:
             for ext in MUTATION_EXTENSIONS:
-                fuzz_url = f"{file_url}{ext}"
-                try:
-                    resp = self.session.head(fuzz_url, timeout=1.5)
-                    if resp.status_code == 200:
-                        if "html" not in resp.headers.get("Content-Type", ""):
-                            findings.append(f"Backup File Found: {fuzz_url}")
-                except: pass
+                candidates.append(f"{file_url}{ext}")
+
+        def check_fuzz(fuzz_url):
+            try:
+                resp = self.session.head(fuzz_url, timeout=1.0)
+                if resp.status_code == 200:
+                    if "html" not in resp.headers.get("Content-Type", ""):
+                        return f"Backup File Found: {fuzz_url}"
+            except:
+                pass
+            return None
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
+            res = list(executor.map(check_fuzz, candidates))
+            findings = [r for r in res if r]
+
         return findings
 
     # --- Feature 4: Mixed Content & Dangerous JS ---

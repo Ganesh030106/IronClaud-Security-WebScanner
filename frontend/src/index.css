@@ -399,3 +399,276 @@ body {
 .severity-info {
   color: var(--color-green);
 }
+
+/* ==========================================================================
+   ADVANCED CYBER HUD & COMMAND CENTER STYLES
+   ========================================================================== */
+
+/* Scan Mode Switch */
+.scan-mode-container {
+  display: flex;
+  gap: 12px;
+  background: #080913;
+  border: 1px solid var(--border-color);
+  padding: 8px;
+  border-radius: 6px;
+  margin-bottom: 15px;
+}
+
+.scan-mode-btn {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 10px 16px;
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+  font-weight: bold;
+  cursor: pointer;
+  border-radius: 4px;
+  transition: all 0.25s ease;
+}
+
+.scan-mode-btn:hover {
+  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.scan-mode-btn.active.deep {
+  background: rgba(0, 210, 255, 0.12);
+  border-color: var(--color-cyan);
+  color: var(--color-cyan);
+  box-shadow: 0 0 15px rgba(0, 210, 255, 0.25);
+}
+
+.scan-mode-btn.active.quick {
+  background: rgba(255, 183, 0, 0.12);
+  border-color: var(--color-yellow);
+  color: var(--color-yellow);
+  box-shadow: 0 0 15px rgba(255, 183, 0, 0.25);
+}
+
+/* CVSS Threat Badges & Matrix */
+.cvss-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  padding: 3px 8px;
+  border-radius: 3px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.cvss-pill.critical {
+  background: rgba(255, 0, 85, 0.18);
+  color: var(--color-red);
+  border: 1px solid var(--color-red);
+}
+
+.cvss-pill.high {
+  background: rgba(255, 120, 0, 0.18);
+  color: #ff7800;
+  border: 1px solid #ff7800;
+}
+
+.cvss-pill.medium {
+  background: rgba(255, 183, 0, 0.18);
+  color: var(--color-yellow);
+  border: 1px solid var(--color-yellow);
+}
+
+.cvss-pill.low {
+  background: rgba(0, 210, 255, 0.18);
+  color: var(--color-cyan);
+  border: 1px solid var(--color-cyan);
+}
+
+.cvss-pill.clean {
+  background: rgba(0, 255, 65, 0.15);
+  color: var(--color-green);
+  border: 1px solid var(--color-green);
+}
+
+/* Vulnerabilities Filter Toolbar */
+.vuln-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 15px;
+  margin-bottom: 20px;
+  flex-wrap: wrap;
+  background: #090a16;
+  border: 1px solid var(--border-color);
+  padding: 12px 16px;
+  border-radius: 6px;
+}
+
+.vuln-search-box {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: #05060e;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  padding: 6px 12px;
+  flex: 1;
+  min-width: 240px;
+}
+
+.vuln-search-box input {
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 0.9rem;
+  width: 100%;
+}
+
+.filter-pills-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.filter-pill-btn {
+  background: #0c0e1a;
+  border: 1px solid var(--border-color);
+  color: var(--text-secondary);
+  padding: 5px 12px;
+  font-size: 0.75rem;
+  border-radius: 4px;
+  cursor: pointer;
+  font-family: var(--font-mono);
+  transition: all 0.2s ease;
+}
+
+.filter-pill-btn:hover {
+  border-color: var(--color-cyan);
+  color: var(--text-primary);
+}
+
+.filter-pill-btn.active {
+  background: rgba(0, 210, 255, 0.12);
+  border-color: var(--color-cyan);
+  color: var(--color-cyan);
+}
+
+.filter-pill-btn.active.critical {
+  background: rgba(255, 0, 85, 0.15);
+  border-color: var(--color-red);
+  color: var(--color-red);
+}
+
+/* Dossier Modal */
+.cyber-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(3, 4, 10, 0.88);
+  backdrop-filter: blur(8px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+  padding: 20px;
+  animation: fadeIn 0.2s ease;
+}
+
+.cyber-modal-card {
+  background: #0b0d1a;
+  border: 1px solid var(--color-cyan);
+  box-shadow: 0 0 35px rgba(0, 210, 255, 0.25);
+  border-radius: 8px;
+  width: 100%;
+  max-width: 820px;
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.cyber-modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border-color);
+  background: #060710;
+}
+
+.cyber-modal-body {
+  padding: 22px;
+  overflow-y: auto;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.cvss-breakdown-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 10px;
+  background: #060812;
+  border: 1px solid var(--border-color);
+  padding: 12px;
+  border-radius: 6px;
+}
+
+.cvss-metric-box {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.cvss-metric-box span.label {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+}
+
+.cvss-metric-box span.val {
+  font-size: 0.85rem;
+  color: var(--color-cyan);
+  font-weight: bold;
+}
+
+.code-preview-box {
+  background: #04050a;
+  border: 1px solid #1a2035;
+  border-radius: 6px;
+  padding: 12px;
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+  overflow-x: auto;
+  color: #ffb700;
+  position: relative;
+}
+
+.copy-badge-btn {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  background: #0d1124;
+  border: 1px solid var(--color-cyan);
+  color: var(--color-cyan);
+  padding: 4px 8px;
+  font-size: 0.7rem;
+  cursor: pointer;
+  border-radius: 3px;
+  font-family: var(--font-mono);
+  transition: all 0.2s ease;
+}
+
+.copy-badge-btn:hover {
+  background: var(--color-cyan);
+  color: #000;
+}
+

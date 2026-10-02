@@ -1,13 +1,13 @@
 const API_BASE = import.meta.env.VITE_API_BASE_URL?.replace(/\/$/, '') || 'http://localhost:8000';
 
 export const scannerApi = {
-  async startScan(url) {
+  async startScan(url, scan_mode = 'deep') {
     const response = await fetch(`${API_BASE}/api/scan`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ url }),
+      body: JSON.stringify({ url, scan_mode }),
     });
     if (!response.ok) {
       const err = await response.json();
@@ -118,3 +118,4 @@ export const scannerApi = {
     return `${API_BASE}/api/export/pdf`;
   }
 };
+

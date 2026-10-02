@@ -22,6 +22,7 @@ from modules.advanced_recon import InfrastructureAuditor
 from modules.content_discovery import ContentAuditor  
 from modules.specialized_checks import SpecializedAuditor 
 from modules.active_attackers import ActiveAttacker 
+from modules.fuzzing_engine import FuzzingEngine
 from modules.traffic_anomaly import AnomalyTester
 from modules.defense_generator import DefenseGenerator
 
@@ -35,15 +36,16 @@ except ImportError:
 # Import configurations
 from config import (ADMIN_PATHS, SQLI_PAYLOADS, XSS_PAYLOAD, SECURITY_HEADERS, SENSITIVE_PATHS, SECRET_REGEX, OPEN_REDIRECT_PAYLOADS, 
                     WAF_SIGNATURES, EMAIL_REGEX, TECH_SIGNATURES, DIRECTORY_LISTING_SIGNATURES, COMMAND_INJECTION_PAYLOADS,
-                    THREAT_WEIGHTS, ANOMALY_THRESHOLD, WMA_DECAY, THRESHOLD_CRITICAL, THRESHOLD_WARNING, THREAT_IMPACT)
+                    DEFAULT_PORTS_ENTERPRISE, THREAT_WEIGHTS, ANOMALY_THRESHOLD, WMA_DECAY, THRESHOLD_CRITICAL, THRESHOLD_WARNING, THREAT_IMPACT)
 
 MAX_SCAN_THREADS = 15
 
 class OWASPTester:
-    def __init__(self, base_url, oast_url=None):
+    def __init__(self, base_url, oast_url=None, scan_mode="deep"):
         self.base_url = base_url.rstrip('/')
         self.domain = urlparse(self.base_url).hostname
         self.oast_url = oast_url
+        self.scan_mode = scan_mode.lower().strip() if scan_mode else "deep"
         
         self.session = requests.Session()
         
@@ -56,12 +58,13 @@ class OWASPTester:
             "Referer": self.oast_url if self.oast_url else "http://google.com"
         })
 
-        # Initialize Auditors
+        # Initialize Auditors & Fuzzing Engine
         self.advanced_auditor = AdvancedAuditor(self.session)
         self.infra_auditor = InfrastructureAuditor(self.session, self.domain)
         self.content_auditor = ContentAuditor(self.session) 
         self.specialized_auditor = SpecializedAuditor(self.session)
         self.active_attacker = ActiveAttacker(self.session)
+        self.fuzzing_engine = FuzzingEngine(self.session, self.base_url)
 
         # Defense Modules
         self.anomaly_tester = AnomalyTester(self.session)
@@ -84,6 +87,13 @@ class OWASPTester:
             self.initial_response = self.session.get(self.base_url, timeout=5)
             self.results["info"]["target"] = self.base_url
             self.results["info"]["status_code"] = self.initial_response.status_code
+            self.results["info"]["scan_mode"] = self.scan_mode
+            self.results["info"]["scan_time_iso"] = datetime.utcnow().isoformat()
+            self.results["info"]["mode_description"] = (
+                "⚡ QUICK RECON: Fast SSL/port surface probe, OWASP top 10 signatures, and active fuzzing."
+                if self.scan_mode == "quick"
+                else "🛡️ DEEP AUDIT: Comprehensive penetration test, 12 enterprise ports, time-delay SQLi, and multi-engine fuzzing."
+            )
         except requests.RequestException as e:
             self.initial_response = None
             raise Exception(f"Could not connect to {self.base_url}. Error: {e}")
@@ -111,7 +121,8 @@ class OWASPTester:
         self.analyze_headers_and_cookies()
         
         # Active Scanning
-        self.scan_ports_with_banners([21, 22, 25, 80, 443, 3306, 5432, 8080, 8443])
+        ports_to_scan = [80, 443, 8080] if self.scan_mode == "quick" else DEFAULT_PORTS_ENTERPRISE
+        self.scan_ports_with_banners(ports_to_scan)
         self.find_admin_pages()
         self.find_sensitive_files_smart()
         self.check_robots_txt()
@@ -175,11 +186,14 @@ class OWASPTester:
             self.results["vulnerabilities"]["A06_CMS_Exposure"] = cms_results
 
         # 5. DNS Zone Transfer
-        zone_results = self.infra_auditor.check_zone_transfer()
-        if zone_results:
-            self.results["vulnerabilities"]["A05_DNS_Zone_Transfer"] = zone_results
+        if self.scan_mode != "quick":
+            zone_results = self.infra_auditor.check_zone_transfer()
+            if zone_results:
+                self.results["vulnerabilities"]["A05_DNS_Zone_Transfer"] = zone_results
+            else:
+                self.results["vulnerabilities"]["A05_DNS_Zone_Transfer"] = ["Secure (Transfer denied)."]
         else:
-            self.results["vulnerabilities"]["A05_DNS_Zone_Transfer"] = ["Secure (Transfer denied)."]
+            self.results["vulnerabilities"]["A05_DNS_Zone_Transfer"] = ["Skipped in Quick Recon mode."]
 
         # 6. Reverse DNS
         rdns_result = self.infra_auditor.reverse_dns_lookup()
@@ -254,10 +268,51 @@ class OWASPTester:
         if crlf_res:
             self.results["vulnerabilities"]["A03_CRLF_Injection"] = crlf_res
             
-        # 3. Time-Based SQLi
-        blind_sqli = self.active_attacker.check_time_based_sqli(self.base_url)
-        if blind_sqli:
-            self.results["vulnerabilities"]["A03_Blind_SQL_Injection"] = blind_sqli
+        # 3. Time-Based SQLi (Only in Deep Audit mode to prevent artificial scan delays)
+        if self.scan_mode != "quick":
+            blind_sqli = self.active_attacker.check_time_based_sqli(self.base_url)
+            if blind_sqli:
+                self.results["vulnerabilities"]["A03_Blind_SQL_Injection"] = blind_sqli
+        else:
+            self.results["vulnerabilities"]["A03_Blind_SQL_Injection"] = ["Skipped in Quick Recon mode (Execute in Deep Audit)."]
+
+        # 4. Advanced Context-Aware XSS Fuzzing
+        adv_xss = self.active_attacker.check_advanced_xss(self.base_url, self.results["recon"].get("crawled_links", []))
+        if adv_xss:
+            current_xss = self.results["vulnerabilities"].get("A07_XSS", [])
+            if isinstance(current_xss, list):
+                if current_xss and "No simple" in str(current_xss[0]):
+                    self.results["vulnerabilities"]["A07_XSS"] = adv_xss
+                else:
+                    self.results["vulnerabilities"]["A07_XSS"].extend(adv_xss)
+
+        # --- Next-Gen Fuzzing Engine Modules ---
+        # 1. SSRF (Server-Side Request Forgery)
+        ssrf_findings = self.fuzzing_engine.check_ssrf(self.results["recon"].get("crawled_links", []))
+        self.results["vulnerabilities"]["A10_SSRF"] = ssrf_findings
+
+        # 2. Path Traversal / Local File Inclusion (LFI)
+        traversal_findings = self.fuzzing_engine.check_path_traversal(self.results["recon"].get("crawled_links", []))
+        self.results["vulnerabilities"]["A03_Path_Traversal_LFI"] = traversal_findings
+
+        # 3. NoSQL Injection
+        nosql_findings = self.fuzzing_engine.check_nosql_injection(self.base_url)
+        self.results["vulnerabilities"]["A03_NoSQL_Injection"] = nosql_findings
+
+        # 4. XML External Entity (XXE) Injection
+        xxe_findings = self.fuzzing_engine.check_xxe(self.results["recon"].get("api_endpoints", []))
+        self.results["vulnerabilities"]["A08_XXE_Injection"] = xxe_findings
+
+        # 5. Web Cache Poisoning & Deception
+        cache_findings = self.fuzzing_engine.check_cache_poisoning()
+        self.results["vulnerabilities"]["A05_Web_Cache_Poisoning"] = cache_findings
+
+        # 6. Insecure Deserialization
+        deser_findings = self.fuzzing_engine.check_insecure_deserialization(
+            self.results["details"].get("cookies", []),
+            getattr(self.initial_response, 'text', '')
+        )
+        self.results["vulnerabilities"]["A08_Insecure_Deserialization"] = deser_findings
 
         # --- Anomaly & Defense (Simulated) ---
         # 1. Rate Limiting
@@ -297,13 +352,34 @@ class OWASPTester:
             self.results["info"]["http2_enabled"] = "Unknown"
 
     def detect_waf_advanced(self):
+        # 1. Fast HTTP Response Header Signature Inspection (0ms)
+        headers_str = str(self.initial_response.headers).lower()
+        waf_header_signatures = {
+            "Cloudflare": ["cf-ray", "__cfduid", "cf-cache-status", "cloudflare"],
+            "AWS CloudFront / WAF": ["x-amz-cf-id", "awselb", "aws-waf"],
+            "Akamai": ["x-akamai-transformed", "akamai-origin-hop", "akamaighost"],
+            "Sucuri": ["x-sucuri-id", "x-sucuri-cache"],
+            "Imperva / Incapsula": ["x-cdn: incapsula", "x-iinfo"],
+            "ModSecurity": ["mod_security", "modsecurity"]
+        }
+        detected = []
+        for waf_name, sigs in waf_header_signatures.items():
+            if any(sig in headers_str for sig in sigs):
+                detected.append(waf_name)
+        
+        if detected:
+            self.results["info"]["waf_detected"] = detected
+            return
+
+        if self.scan_mode == "quick":
+            self.results["info"]["waf_detected"] = ["No signature detected in HTTP headers (Quick Mode)"]
+            return
+
+        # 2. Deep WAFW00F Probing (Only in Deep Audit Mode)
         try:
             waf = WAFW00F(self.base_url)
-            detected = waf.ident_waf()
-            if detected:
-                self.results["info"]["waf_detected"] = detected
-            else:
-                self.results["info"]["waf_detected"] = ["No WAF detected (Generic)"]
+            found = waf.ident_waf()
+            self.results["info"]["waf_detected"] = found if found else ["No WAF detected (Generic)"]
         except Exception as e:
             self.results["info"]["waf_detected"] = [f"WAF Scan Error: {str(e)}"]
 
@@ -340,7 +416,8 @@ class OWASPTester:
 
     def check_cves(self):
         found_cves = []
-        if not self.tech_stack or "Error" in self.tech_stack:
+        if self.scan_mode == "quick" or not self.tech_stack or "Error" in self.tech_stack:
+            self.results["cves"] = []
             return
 
         for software, version in list(self.tech_stack.items())[:2]:
@@ -385,6 +462,12 @@ class OWASPTester:
         
         cookie_data = []
         for cookie in self.session.cookies:
+            rest = getattr(cookie, "rest", None) or getattr(cookie, "_rest", {})
+            samesite = "None"
+            if isinstance(rest, dict):
+                for k, v in rest.items():
+                    if k.lower() == "samesite":
+                        samesite = str(v)
             cookie_data.append({
                 "Name": cookie.name,
                 "Value": cookie.value[:20] + "..." if len(cookie.value) > 20 else cookie.value,
@@ -392,6 +475,7 @@ class OWASPTester:
                 "Path": cookie.path,
                 "Secure": cookie.secure,
                 "HttpOnly": cookie.has_nonstandard_attr('HttpOnly') or cookie.has_nonstandard_attr('httponly'),
+                "SameSite": samesite,
                 "Expires": cookie.expires
             })
         self.results["details"]["cookies"] = cookie_data
@@ -433,8 +517,9 @@ class OWASPTester:
     def crawl_links(self):
         to_visit = [self.base_url]
         all_links = set()
+        max_crawl = 4 if self.scan_mode == "quick" else 15
         
-        while to_visit and len(all_links) < 15:
+        while to_visit and len(all_links) < max_crawl:
             url = to_visit.pop()
             if url in self.visited_links: continue
             self.visited_links.add(url)
@@ -464,8 +549,13 @@ class OWASPTester:
         except: self.results["recon"]["ip_address"] = "N/A"
     
     def get_whois(self):
-        try: self.results["recon"]["whois"] = str(whois.whois(self.domain))
-        except: self.results["recon"]["whois"] = "Lookup failed"
+        if self.scan_mode == "quick":
+            self.results["recon"]["whois"] = "Skipped in Quick Recon mode (Execute in Deep Audit)."
+            return
+        try: 
+            self.results["recon"]["whois"] = str(whois.whois(self.domain))
+        except: 
+            self.results["recon"]["whois"] = "Lookup failed"
 
     def scan_ports_with_banners(self, ports):
         open_ports = []
@@ -488,6 +578,7 @@ class OWASPTester:
     def find_admin_pages(self):
         self.failed_admin_attempts = 0
         found = []
+        paths = ADMIN_PATHS[:6] if self.scan_mode == "quick" else ADMIN_PATHS
         def check(path):
             try:
                 resp = self.session.get(urljoin(self.base_url, path), timeout=1.0, allow_redirects=False)
@@ -497,18 +588,21 @@ class OWASPTester:
                     return path
             except: pass
         with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_SCAN_THREADS) as ex:
-            found = list(filter(None, ex.map(check, ADMIN_PATHS)))
+            found = list(filter(None, ex.map(check, paths)))
         self.results["recon"]["admin_pages_found"] = found
 
     def find_sensitive_files_smart(self):
-        paths_to_check = list(SENSITIVE_PATHS)
-        domain_parts = self.domain.split('.')
-        base_name = domain_parts[0]
-        
-        extensions = ['.zip', '.tar.gz', '.sql', '.bak', '.old']
-        for ext in extensions:
-            paths_to_check.append(f"/{self.domain}{ext}")
-            paths_to_check.append(f"/{base_name}{ext}")
+        if self.scan_mode == "quick":
+            paths_to_check = list(SENSITIVE_PATHS[:6])
+        else:
+            paths_to_check = list(SENSITIVE_PATHS)
+            domain_parts = self.domain.split('.')
+            base_name = domain_parts[0]
+            
+            extensions = ['.zip', '.tar.gz', '.sql', '.bak', '.old']
+            for ext in extensions:
+                paths_to_check.append(f"/{self.domain}{ext}")
+                paths_to_check.append(f"/{base_name}{ext}")
 
         found = []
         def check(path):
@@ -544,16 +638,44 @@ class OWASPTester:
 
     def scan_js_files(self):
         found = []
+        seen = set()
+
+        # Check inline HTML and scripts first
+        if self.initial_response and self.initial_response.text:
+            for name, pat in SECRET_REGEX.items():
+                for match in re.finditer(pat, self.initial_response.text):
+                    snippet = match.group(0)
+                    key = (name, snippet)
+                    if key not in seen:
+                        seen.add(key)
+                        masked = snippet[:6] + "..." + snippet[-4:] if len(snippet) > 12 else snippet
+                        found.append({"type": name, "file": "inline HTML / script", "snippet": masked})
+
         def scan(url):
+            local_found = []
             try:
-                text = self.session.get(url, timeout=2).text
+                text = self.session.get(url, timeout=2.5).text
                 for name, pat in SECRET_REGEX.items():
                     for match in re.finditer(pat, text):
-                        return {"type": name, "file": url, "snippet": match.group(0)}
-            except: pass
+                        snippet = match.group(0)
+                        masked = snippet[:6] + "..." + snippet[-4:] if len(snippet) > 12 else snippet
+                        local_found.append({"type": name, "file": url, "snippet": masked})
+                        if len(local_found) >= 3:
+                            break
+            except Exception:
+                pass
+            return local_found
+
         with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_SCAN_THREADS) as ex:
-            found = list(filter(None, ex.map(scan, self.js_files)))
-        self.results["vulnerabilities"]["CRITICAL_Hardcoded_Secrets"] = found
+            results = ex.map(scan, list(self.js_files)[:10])
+            for res_list in results:
+                for item in res_list:
+                    key = (item["type"], item["snippet"])
+                    if key not in seen:
+                        seen.add(key)
+                        found.append(item)
+
+        self.results["vulnerabilities"]["CRITICAL_Hardcoded_Secrets"] = found[:15]
 
     def check_command_injection(self):
         issues = []
@@ -599,17 +721,23 @@ class OWASPTester:
 
                         rest = getattr(cookie, "rest", None) or getattr(cookie, "_rest", {})
                         has_httponly = False
+                        has_samesite = False
                         if isinstance(rest, dict):
                             if any(k.lower() == "httponly" for k in rest.keys()):
                                 has_httponly = True
                             if rest.get("httponly") or rest.get("HttpOnly"):
                                 has_httponly = True
+                            if any(k.lower() == "samesite" for k in rest.keys()):
+                                has_samesite = True
 
                         if not has_httponly and getattr(cookie, "httponly", False):
                             has_httponly = True
 
                         if not has_httponly:
                             insecure_cookies.append(f"Cookie '{name}' missing 'HttpOnly' flag.")
+                        
+                        if not has_samesite:
+                            insecure_cookies.append(f"Cookie '{name}' missing 'SameSite' attribute (CSRF exposure).")
         else:
             for name, _value in jar.items():
                 insecure_cookies.append(f"Cookie '{name}' present but cookie flags could not be inspected.")
@@ -744,11 +872,16 @@ class OWASPTester:
         current_score = 0.0
         history = [0.0]
         
+        has_ssrf = bool(self.results["vulnerabilities"].get("A10_SSRF") and "No SSRF" not in str(self.results["vulnerabilities"].get("A10_SSRF")))
+        has_lfi = bool(self.results["vulnerabilities"].get("A03_Path_Traversal_LFI") and "No simple" not in str(self.results["vulnerabilities"].get("A03_Path_Traversal_LFI")))
+        has_secrets = bool(self.results["vulnerabilities"].get("CRITICAL_Hardcoded_Secrets"))
+
         check_results = [
             ("DNS Lookup", 0.05),
             ("Port Scan", 0.2 if self.results["recon"].get("open_ports") else 0.0),
             ("Admin Search", 0.4 if self.results["recon"].get("admin_pages_found") else 0.0),
-            ("Vulnerability Scan", 0.8 if self.results["vulnerabilities"].get("A03_Injection") else 0.0)
+            ("Vulnerability Scan", 0.8 if (self.results["vulnerabilities"].get("A03_Injection") or has_lfi) else 0.0),
+            ("Critical Threats (SSRF / Secrets)", 0.95 if (has_ssrf or has_secrets) else 0.0)
         ]
 
         for label, weight in check_results:
