@@ -1,4 +1,4 @@
-from fastapi import FastAPI, BackgroundTasks, HTTPException, Response
+from fastapi import FastAPI, BackgroundTasks, HTTPException, Response, Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -10,6 +10,9 @@ import io
 import os
 import logging
 import math
+import time
+import socket
+import ipaddress
 from urllib.parse import urlparse
 from scanner import OWASPTester
 from utils.pdf_report import create_pdf_report
@@ -17,6 +20,18 @@ from utils.pdf_report import create_pdf_report
 app = FastAPI(title="IronClad Security Scanner API")
 
 logger = logging.getLogger("webscanner.api")
+
+# HTTP Security Headers Middleware
+@app.middleware("http")
+async def add_security_headers(request: Request, call_next):
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    response.headers["Permissions-Policy"] = "geolocation=(), microphone=(), camera=()"
+    response.headers["X-Permitted-Cross-Domain-Policies"] = "none"
+    return response
 
 @app.on_event("startup")
 def startup_event():
@@ -79,6 +94,59 @@ class ScanRequest(BaseModel):
     url: str
     scan_mode: Optional[str] = "deep"  # "quick" or "deep"
 
+# Security Hardening: SSRF Target Validator
+BLOCKED_HOSTNAMES = {
+    "localhost", "127.0.0.1", "0.0.0.0", "::1",
+    "169.254.169.254", "metadata.google.internal", "instance-data"
+}
+
+def is_safe_target(url: str) -> tuple:
+    """Validate target URL to prevent SSRF against internal/cloud infrastructure."""
+    try:
+        if len(url) > 2048:
+            return False, "Target URL exceeds maximum allowed length (2048 characters)."
+            
+        parsed = urlparse(url)
+        if parsed.scheme not in ["http", "https"]:
+            return False, "Invalid protocol. Target URL must begin with http:// or https://"
+        
+        hostname = parsed.hostname
+        if not hostname:
+            return False, "Target URL does not contain a valid host name."
+
+        if hostname.lower() in BLOCKED_HOSTNAMES:
+            return False, f"Scanning loopback, internal, or cloud metadata endpoints ({hostname}) is restricted for server security."
+
+        allow_private = os.getenv("ALLOW_PRIVATE_SCANS", "false").lower() in ("true", "1")
+        if not allow_private:
+            try:
+                addr_info = socket.getaddrinfo(hostname, None)
+                for item in addr_info:
+                    ip_str = item[4][0]
+                    ip = ipaddress.ip_address(ip_str)
+                    if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_multicast or ip.is_reserved:
+                        return False, f"Prohibited SSRF target: resolved IP {ip_str} belongs to private or cloud-internal space (RFC 1918 / 169.254.0.0/16)."
+            except socket.gaierror:
+                pass
+
+        return True, ""
+    except Exception as e:
+        return False, f"URL validation error: {str(e)}"
+
+# Sliding-window Rate Limiter (Max 10 scans / 60 seconds per IP)
+SCAN_RATE_LIMIT = {}
+
+def check_rate_limit(client_ip: str, max_requests: int = 10, window_seconds: int = 60) -> bool:
+    now = time.time()
+    history = SCAN_RATE_LIMIT.get(client_ip, [])
+    history = [t for t in history if now - t < window_seconds]
+    if len(history) >= max_requests:
+        SCAN_RATE_LIMIT[client_ip] = history
+        return False
+    history.append(now)
+    SCAN_RATE_LIMIT[client_ip] = history
+    return True
+
 def sanitize_for_json(value):
     if isinstance(value, dict):
         return {str(k): sanitize_for_json(v) for k, v in value.items()}
@@ -109,12 +177,17 @@ def run_scan_task(url: str, scan_mode: str = "deep"):
         CURRENT_SCAN["error"] = str(e)
 
 @app.post("/api/scan")
-def start_scan(request: ScanRequest, background_tasks: BackgroundTasks):
+def start_scan(request: ScanRequest, background_tasks: BackgroundTasks, req: Request):
     global CURRENT_SCAN
     
     url = request.url.strip()
-    if not (url.startswith("http://") or url.startswith("https://")):
-        raise HTTPException(status_code=400, detail="Invalid protocol. URL must start with http:// or https://")
+    is_safe, error_msg = is_safe_target(url)
+    if not is_safe:
+        raise HTTPException(status_code=400, detail=error_msg)
+        
+    client_ip = req.client.host if req.client else "unknown"
+    if not check_rate_limit(client_ip):
+        raise HTTPException(status_code=429, detail="Rate limit exceeded. Maximum 10 scan requests per minute allowed.")
         
     if CURRENT_SCAN["status"] == "scanning":
         return {"status": "scanning", "message": "A scan is already in progress."}

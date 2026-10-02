@@ -7,7 +7,29 @@ from main import app
 
 client = TestClient(app)
 
-print("--- Testing /api/waf/config ---")
+print("--- Testing HTTP Security Headers Middleware ---")
+response = client.get("/api/health")
+print("Response headers:", dict(response.headers))
+assert response.headers.get("x-content-type-options") == "nosniff"
+assert response.headers.get("x-frame-options") == "DENY"
+assert "strict-transport-security" in response.headers
+print("Security headers verified!")
+
+print("\n--- Testing SSRF & Private Target Blocking ---")
+res_local = client.post("/api/scan", json={"url": "http://127.0.0.1:8000"})
+assert res_local.status_code == 400
+print("Blocked 127.0.0.1:", res_local.json()["detail"])
+
+res_meta = client.post("/api/scan", json={"url": "http://169.254.169.254/latest/meta-data"})
+assert res_meta.status_code == 400
+print("Blocked cloud metadata:", res_meta.json()["detail"])
+
+res_localhost = client.post("/api/scan", json={"url": "http://localhost/admin"})
+assert res_localhost.status_code == 400
+print("Blocked localhost:", res_localhost.json()["detail"])
+print("SSRF protection verified!")
+
+print("\n--- Testing /api/waf/config ---")
 response = client.get("/api/waf/config")
 print("Response status:", response.status_code)
 print("Response JSON:", response.json())
