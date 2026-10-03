@@ -56,7 +56,21 @@ def startup_event():
         logger.error(f"Error starting background firewall services: {e}")
 
 
+@app.get("/")
+@app.head("/")
+def root():
+    """Root endpoint for pinging and service status."""
+    return {
+        "status": "online",
+        "service": "IronClad Security Scanner API",
+        "health": "/api/health"
+    }
+
+
+@app.get("/health")
+@app.head("/health")
 @app.get("/api/health")
+@app.head("/api/health")
 def health():
     """Simple health check endpoint."""
     return {"status": "ok", "service": "IronClad Backend"}

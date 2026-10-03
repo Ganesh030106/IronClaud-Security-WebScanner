@@ -15,6 +15,22 @@ assert response.headers.get("x-frame-options") == "DENY"
 assert "strict-transport-security" in response.headers
 print("Security headers verified!")
 
+print("\n--- Testing Root and Health Ping Endpoints ---")
+res_root = client.get("/")
+assert res_root.status_code == 200
+assert res_root.json()["status"] == "online"
+
+res_root_head = client.head("/")
+assert res_root_head.status_code == 200
+
+res_health = client.get("/health")
+assert res_health.status_code == 200
+assert res_health.json()["status"] == "ok"
+
+res_api_health_head = client.head("/api/health")
+assert res_api_health_head.status_code == 200
+print("Root and Health endpoints verified!")
+
 print("\n--- Testing SSRF & Private Target Blocking ---")
 res_local = client.post("/api/scan", json={"url": "http://127.0.0.1:8000"})
 assert res_local.status_code == 400
